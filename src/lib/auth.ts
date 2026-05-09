@@ -21,8 +21,6 @@ function getJwtSecret(): Uint8Array {
   return new TextEncoder().encode(secret)
 }
 
-const JWT_SECRET = getJwtSecret()
-
 export interface AdminSession {
   id: string
   email: string
@@ -38,16 +36,18 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 export async function createAdminToken(admin: AdminSession): Promise<string> {
+  const jwtSecret = getJwtSecret()
   return new SignJWT({ ...admin })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('24h')
-    .sign(JWT_SECRET)
+    .sign(jwtSecret)
 }
 
 export async function verifyAdminToken(token: string): Promise<AdminSession | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET)
+    const jwtSecret = getJwtSecret()
+    const { payload } = await jwtVerify(token, jwtSecret)
     const id = typeof payload.id === 'string' ? payload.id : ''
     const email = typeof payload.email === 'string' ? payload.email : ''
     const name =

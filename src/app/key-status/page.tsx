@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   CheckCircle2,
@@ -106,7 +106,7 @@ export default function KeyStatusPage() {
   const inflightRef = useRef<AbortController | null>(null)
   const prevStatusRef = useRef<KeyStatus | null>(null)
 
-  async function checkKey(opts?: { preserveStatus?: boolean }) {
+  const checkKey = useCallback(async (opts?: { preserveStatus?: boolean }) => {
     if (!apiKey.trim()) {
       setError('Please enter an API key')
       return
@@ -163,7 +163,7 @@ export default function KeyStatusPage() {
         setLoading(false)
       }
     }
-  }
+  }, [apiKey])
 
   async function copyKey() {
     if (!apiKey.trim()) return
@@ -223,7 +223,7 @@ export default function KeyStatusPage() {
       checkKey({ preserveStatus: true })
     }, autoRefreshSec * 1000)
     return () => window.clearInterval(id)
-  }, [status, autoRefreshSec, apiKey])
+  }, [status, autoRefreshSec, apiKey, checkKey])
 
   useEffect(() => {
     return () => inflightRef.current?.abort()
