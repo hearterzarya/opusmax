@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: opusx-postgres
+    environment:
+      POSTGRES_USER: opusx
+      POSTGRES_PASSWORD: opusx_dev_password
+      POSTGRES_DB: opusx_gateway
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opusx"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: opusx-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: opusx-app
+    environment:
+      DATABASE_URL: postgresql://opusx:opusx_dev_password@postgres:5432/opusx_gateway
+      REDIS_URL: redis://redis:6379
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      UPSTREAM_ANTHROPIC_BASE_URL: https://api.anthropic.com
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
+      ADMIN_EMAIL: admin@opusx.gateway
+      ADMIN_PASSWORD: OpusX-Admin-2026!
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
