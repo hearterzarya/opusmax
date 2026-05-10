@@ -3,6 +3,13 @@ import { ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
 import { upstreamModelsListUrl } from '@/lib/upstream-anthropic'
+import { getAnthropicModelsListFallback } from '@/lib/anthropic-models-fallback'
+
+const corsHeaders: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key',
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,7 +26,10 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const modelsUrl = upstreamModelsListUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
+    const baseModelsUrl = upstreamModelsListUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
+    const search = request.nextUrl.search
+    const modelsUrl = search ? `${baseModelsUrl}${search}` : baseModelsUrl
+
     const upstreamResponse = await fetch(modelsUrl, {
       method: 'GET',
       headers: {
@@ -27,6 +37,15 @@ export async function GET(request: NextRequest) {
         'anthropic-version': '2023-06-01',
       },
     })
+
+    const bumpLastUsed = () => {
+      prisma.apiKey
+        .update({
+          where: { id: key.id },
+          data: { lastUsedAt: new Date() },
+        })
+        .catch(console.error)
+    }
 
     if (!upstreamResponse.ok) {
       let preview = ''
@@ -36,24 +55,48 @@ export async function GET(request: NextRequest) {
         /* ignore */
       }
       console.error('[models] upstream', upstreamResponse.status, modelsUrl, preview)
+
+      const fallbackDisabled = process.env.GATEWAY_DISABLE_MODELS_FALLBACK === '1'
+      if (!fallbackDisabled) {
+        bumpLastUsed()
+        const body = getAnthropicModelsListFallback()
+        return NextResponse.json(body, {
+          headers: {
+            ...corsHeaders,
+            'x-opusx-models': 'fallback',
+            'x-opusx-upstream-status': String(upstreamResponse.status),
+          },
+        })
+      }
+
       return createErrorResponse(
         ErrorCodes.UPSTREAM_ERROR,
-        `Anthropic models request failed (${upstreamResponse.status}). On Vercel set ANTHROPIC_API_KEY and UPSTREAM_ANTHROPIC_BASE_URL=https://api.anthropic.com (no /v1 double path).`,
+        `Anthropic models request failed (${upstreamResponse.status}). Set ANTHROPIC_API_KEY on Vercel or unset GATEWAY_DISABLE_MODELS_FALLBACK to allow a built-in model list.`,
         502,
         { upstream_status: upstreamResponse.status, upstream_body_preview: preview || undefined }
       )
     }
 
-    const data = await upstreamResponse.json()
+    let data: unknown
+    try {
+      data = await upstreamResponse.json()
+    } catch {
+      console.error('[models] upstream returned non-JSON')
+      if (process.env.GATEWAY_DISABLE_MODELS_FALLBACK === '1') {
+        return createErrorResponse(
+          ErrorCodes.UPSTREAM_ERROR,
+          'Upstream models response was not valid JSON',
+          502
+        )
+      }
+      bumpLastUsed()
+      return NextResponse.json(getAnthropicModelsListFallback(), {
+        headers: { ...corsHeaders, 'x-opusx-models': 'fallback', 'x-opusx-upstream-status': 'invalid-json' },
+      })
+    }
 
-    // Update last used
-    prisma.apiKey.update({
-      where: { id: key.id },
-      data: { lastUsedAt: new Date() },
-    }).catch(console.error)
-
-    return NextResponse.json(data)
-
+    bumpLastUsed()
+    return NextResponse.json(data, { headers: corsHeaders })
   } catch (error) {
     console.error('Models endpoint error:', error)
     return createErrorResponse(ErrorCodes.UPSTREAM_ERROR, 'An error occurred', 500)
@@ -63,10 +106,6 @@ export async function GET(request: NextRequest) {
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key',
-    },
+    headers: corsHeaders,
   })
 }
