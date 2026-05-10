@@ -6,9 +6,18 @@ import { createErrorResponse, ErrorCodes, generateKeyPair } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { resetRollingWindowQuota } from '@/lib/quota'
 
-const patchSchema = z.object({
-  action: z.enum(['pause', 'activate', 'revoke', 'reset_quota', 'rotate', 'delete']),
-})
+const patchBodySchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('pause') }),
+  z.object({ action: z.literal('activate') }),
+  z.object({ action: z.literal('revoke') }),
+  z.object({ action: z.literal('reset_quota') }),
+  z.object({ action: z.literal('rotate') }),
+  z.object({ action: z.literal('delete') }),
+  z.object({
+    action: z.literal('set_expiry'),
+    expiresAt: z.union([z.string().datetime(), z.null()]),
+  }),
+])
 
 const actionToStatus = {
   pause: 'PAUSED',
@@ -35,7 +44,7 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { action } = patchSchema.parse(body)
+    const patch = patchBodySchema.parse(body)
 
     const existing = await prisma.apiKey.findUnique({
       where: { id },
@@ -46,13 +55,55 @@ export async function PATCH(
     }
 
     // REVOKED is terminal.
-    if (existing.status === 'REVOKED' && action !== 'revoke') {
+    if (existing.status === 'REVOKED' && patch.action !== 'revoke') {
       return createErrorResponse(
         ErrorCodes.KEY_INACTIVE,
         'Revoked keys cannot be re-activated',
         409
       )
     }
+
+    if (patch.action === 'set_expiry') {
+      const nextExpires =
+        patch.expiresAt === null ? null : new Date(patch.expiresAt)
+
+      if (nextExpires && nextExpires.getTime() <= Date.now()) {
+        return createErrorResponse(
+          ErrorCodes.VALIDATION_ERROR,
+          'Expiration must be in the future, or use null to remove expiry',
+          400
+        )
+      }
+
+      const nextStatus = existing.status === 'PAUSED' ? 'PAUSED' : 'ACTIVE'
+
+      const key = await prisma.apiKey.update({
+        where: { id },
+        data: {
+          expiresAt: nextExpires,
+          status: nextStatus,
+        },
+        select: { id: true, name: true, status: true, expiresAt: true },
+      })
+
+      prisma.auditLog
+        .create({
+          data: {
+            adminId: session.id,
+            action: 'SET_API_KEY_EXPIRY',
+            details: {
+              keyId: key.id,
+              keyName: key.name,
+              expiresAt: key.expiresAt?.toISOString() ?? null,
+            },
+          },
+        })
+        .catch((error) => console.warn('Audit log write failed:', error))
+
+      return NextResponse.json({ success: true, key })
+    }
+
+    const action = patch.action
 
     if (action === 'reset_quota') {
       await resetRollingWindowQuota(existing.id)

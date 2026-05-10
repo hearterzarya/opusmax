@@ -21,17 +21,14 @@ interface KeyStatus {
   status: string | null
   quotaBlocked?: boolean
   name: string | null
-  createdAt?: string | null
   expiresAt: string | null
   hourlyUsage: number | null
   hourlyBudget: number | null
   hourlyRemaining?: number | null
-  windowStartedAt?: string | null
   windowResetAt: string | null
   lastUsed: string | null
   rpmLimit: number | null
-  requests24h?: number | null
-  allTimeRequests?: number | null
+  recentRequests: number | null
 }
 
 function extractErrorMessage(value: unknown, fallback: string): string {
@@ -143,8 +140,7 @@ export default function KeyStatusPage() {
         !previous ||
         previous.hourlyUsage !== next.hourlyUsage ||
         previous.windowResetAt !== next.windowResetAt ||
-        previous.requests24h !== next.requests24h ||
-        previous.allTimeRequests !== next.allTimeRequests ||
+        previous.recentRequests !== next.recentRequests ||
         previous.lastUsed !== next.lastUsed
       prevStatusRef.current = next
       setStatus(next)
@@ -199,15 +195,6 @@ export default function KeyStatusPage() {
     const diff = Math.max(0, resetTs - nowMs)
     return formatDuration(diff)
   }, [status?.windowResetAt, nowMs])
-
-  const expiresIn = useMemo(() => {
-    if (!status?.expiresAt) return null
-    const ts = new Date(status.expiresAt).getTime()
-    if (!Number.isFinite(ts)) return null
-    const diff = ts - nowMs
-    if (diff <= 0) return 'Expired'
-    return `${formatRelativeFuture(diff)} remaining`
-  }, [status?.expiresAt, nowMs])
 
   const lastSeenAgo = useMemo(() => {
     if (!status?.lastUsed) return 'Never'
@@ -347,14 +334,10 @@ export default function KeyStatusPage() {
                   </div>
 
                   <div className="grid gap-6 border-t border-white/10 pt-6 sm:grid-cols-2 lg:grid-cols-4">
-                    <Stat
-                      label="Created"
-                      big={status.createdAt ? formatDateShort(status.createdAt) : '—'}
-                      sub={status.createdAt ? formatTimestamp(status.createdAt) : 'Not available'}
-                    />
+                    <Stat label="Created" big="—" sub="Not exposed by gateway" />
                     <Stat
                       label="Expires"
-                      big={status.expiresAt ? expiresIn || 'Set' : 'No expiry'}
+                      big={status.expiresAt ? 'Set' : 'No expiry'}
                       sub={formatTimestamp(status.expiresAt)}
                     />
                     <Stat
@@ -387,21 +370,9 @@ export default function KeyStatusPage() {
                     </div>
                   </div>
                   <p className="mt-2 text-sm text-white/60">
-                    Window started:{' '}
-                    <span className="font-mono text-white">
-                      {status.windowStartedAt ? formatTimestamp(status.windowStartedAt) : 'After first request'}
-                    </span>
-                  </p>
-                  <p className="mt-1 text-sm text-white/60">
                     Window reset in:{' '}
                     <span className="font-mono text-white">
                       {windowCountdown || 'Starts after first request'}
-                    </span>
-                  </p>
-                  <p className="mt-1 text-sm text-white/60">
-                    Resets at:{' '}
-                    <span className="font-mono text-white">
-                      {status.windowResetAt ? formatTimestamp(status.windowResetAt) : '—'}
                     </span>
                   </p>
 
@@ -436,24 +407,11 @@ export default function KeyStatusPage() {
                 </section>
               )}
 
-              <section className="grid gap-4 md:grid-cols-4">
+              <section className="grid gap-4 md:grid-cols-3">
                 <MetricCard
                   label="Total requests"
-                  value={
-                    status.allTimeRequests !== null && status.allTimeRequests !== undefined
-                      ? compactNumber(status.allTimeRequests)
-                      : '0'
-                  }
-                  sub="All time"
-                />
-                <MetricCard
-                  label="24h requests"
-                  value={
-                    status.requests24h !== null && status.requests24h !== undefined
-                      ? compactNumber(status.requests24h)
-                      : '0'
-                  }
-                  sub="Last 24 hours"
+                  value={status.recentRequests !== null ? compactNumber(status.recentRequests) : '0'}
+                  sub="24h window"
                 />
                 <MetricCard
                   label="Window reset"
@@ -495,23 +453,6 @@ function formatRelative(ms: number): string {
   if (hrs < 24) return `${hrs}h ago`
   const days = Math.floor(hrs / 24)
   return `${days}d ago`
-}
-
-function formatRelativeFuture(ms: number): string {
-  const sec = Math.floor(ms / 1000)
-  if (sec < 60) return `${sec}s`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m`
-  const hrs = Math.floor(min / 60)
-  if (hrs < 24) return `${hrs}h`
-  const days = Math.floor(hrs / 24)
-  return `${days}d`
-}
-
-function formatDateShort(value: string): string {
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 function Stat({ label, big, sub }: { label: string; big: string; sub: string }) {

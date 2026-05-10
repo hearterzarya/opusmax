@@ -128,6 +128,10 @@ docker-compose down
 
 ## Client Configuration
 
+This repository **is** the gateway you deploy. The [`opusx` package on npm](https://www.npmjs.com/package/opusx) is a related scaffold (full app + `opusx` CLI for greenfield setups). **Do not `npm install opusx` into this project**—you would nest a second Next.js app. Instead, point any Anthropic-compatible client at **your** deployment using the variables below.
+
+The npm readme uses `ANTHROPIC_BASE_URL=…/api` and a short key prefix example. This gateway uses the same **base URL shape** (`…/api` so paths become `/api/v1/messages`). Issued keys use the prefix **`sk-ant-ox-`** (not `sk-ox-`).
+
 ### Claude Code
 
 Edit `~/.claude/settings.json`:

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Pause, Play, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
+import { CalendarClock, Pause, Play, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import {
   AlertDialog,
@@ -21,11 +21,19 @@ interface KeyRowActionsProps {
   status: KeyStatus | string
 }
 
-async function updateKeyStatus(keyId: string, action: 'pause' | 'activate' | 'reset_quota' | 'rotate' | 'delete') {
+async function updateKeyStatus(
+  keyId: string,
+  action: 'pause' | 'activate' | 'reset_quota' | 'rotate' | 'delete' | 'set_expiry',
+  extra?: { expiresAt: string | null }
+) {
   const response = await fetch(`/api/admin/keys/${keyId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action }),
+    body: JSON.stringify(
+      action === 'set_expiry'
+        ? { action: 'set_expiry', expiresAt: extra?.expiresAt ?? null }
+        : { action }
+    ),
   })
   const payload = (await response.json().catch(() => null)) as
     | { error?: { message?: string }; rawKey?: string }
@@ -46,6 +54,34 @@ export function KeyRowActions({ keyId, status }: KeyRowActionsProps) {
   const isPaused = status === 'PAUSED'
   const canPause = status === 'ACTIVE'
   const canActivate = status === 'PAUSED'
+
+  const runSetExpiry = async () => {
+    const input = window.prompt(
+      'Days until expiry (whole number), or leave empty for no expiry:',
+      '365'
+    )
+    if (input === null) return
+    const trimmed = input.trim()
+    let expiresAt: string | null = null
+    if (trimmed !== '') {
+      const days = Number(trimmed)
+      if (!Number.isFinite(days) || days < 1) {
+        window.alert('Enter a positive number of days, or leave empty for no expiry.')
+        return
+      }
+      expiresAt = new Date(Date.now() + days * 86400000).toISOString()
+    }
+    try {
+      setLoadingAction('set_expiry')
+      await updateKeyStatus(keyId, 'set_expiry', { expiresAt })
+      router.refresh()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to set expiry'
+      window.alert(message)
+    } finally {
+      setLoadingAction(null)
+    }
+  }
 
   const run = async (action: 'pause' | 'activate' | 'reset_quota' | 'rotate' | 'delete') => {
     try {
@@ -77,6 +113,15 @@ export function KeyRowActions({ keyId, status }: KeyRowActionsProps) {
   return (
     <>
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={isRevoked || !!loadingAction}
+          onClick={() => runSetExpiry()}
+          className="inline-flex items-center gap-1 rounded-md border border-sky-400/25 bg-sky-400/10 px-2.5 py-1 text-xs text-sky-200 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <CalendarClock className="h-3 w-3" />
+          Set expiry
+        </button>
         <button
         type="button"
         disabled={!canPause || !!loadingAction || isRevoked}

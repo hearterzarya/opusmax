@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
+import { upstreamModelsListUrl } from '@/lib/upstream-anthropic'
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,18 +10,38 @@ export async function GET(request: NextRequest) {
     if (!auth.ok) return auth.response
     const key = auth.key
 
-    // Forward to upstream Anthropic
-    const upstreamUrl = process.env.UPSTREAM_ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
-    const upstreamResponse = await fetch(`${upstreamUrl}/v1/models`, {
+    const upstreamKey = (process.env.ANTHROPIC_API_KEY || '').trim()
+    if (!upstreamKey) {
+      return createErrorResponse(
+        ErrorCodes.UPSTREAM_ERROR,
+        'Server misconfigured: ANTHROPIC_API_KEY is missing on the gateway (set it in Vercel env)',
+        500
+      )
+    }
+
+    const modelsUrl = upstreamModelsListUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
+    const upstreamResponse = await fetch(modelsUrl, {
       method: 'GET',
       headers: {
-        'x-api-key': process.env.ANTHROPIC_API_KEY!,
+        'x-api-key': upstreamKey,
         'anthropic-version': '2023-06-01',
       },
     })
 
     if (!upstreamResponse.ok) {
-      return createErrorResponse(ErrorCodes.UPSTREAM_ERROR, 'Failed to fetch models from upstream', 502)
+      let preview = ''
+      try {
+        preview = (await upstreamResponse.text()).slice(0, 280)
+      } catch {
+        /* ignore */
+      }
+      console.error('[models] upstream', upstreamResponse.status, modelsUrl, preview)
+      return createErrorResponse(
+        ErrorCodes.UPSTREAM_ERROR,
+        `Anthropic models request failed (${upstreamResponse.status}). On Vercel set ANTHROPIC_API_KEY and UPSTREAM_ANTHROPIC_BASE_URL=https://api.anthropic.com (no /v1 double path).`,
+        502,
+        { upstream_status: upstreamResponse.status, upstream_body_preview: preview || undefined }
+      )
     }
 
     const data = await upstreamResponse.json()

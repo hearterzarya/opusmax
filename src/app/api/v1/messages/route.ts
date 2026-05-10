@@ -4,31 +4,35 @@ import { prisma } from '@/lib/prisma'
 import { hashApiKey, ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { checkRateLimit } from '@/lib/redis'
 import { QUOTA_WINDOW_SECONDS, reserveRollingWindowQuota, settleRollingWindowQuota } from '@/lib/quota'
+import { isApiKeyPastExpiry } from '@/lib/api-key-expiry'
+import { upstreamMessagesUrl } from '@/lib/upstream-anthropic'
 import { z } from 'zod'
 
-const messageSchema = z.object({
-  model: z.string().min(1),
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(['user', 'assistant', 'system']),
-        content: z.union([z.string(), z.array(z.any())]),
+const messageSchema = z
+  .object({
+    model: z.string().min(1),
+    messages: z
+      .array(
+        z.object({
+          role: z.enum(['user', 'assistant', 'system']),
+          content: z.union([z.string(), z.array(z.any())]),
+        })
+      )
+      .min(1),
+    max_tokens: z.number().int().positive().optional(),
+    stream: z.boolean().optional(),
+    system: z.union([z.string(), z.array(z.any())]).optional(),
+    temperature: z.number().min(0).max(1).optional(),
+    top_p: z.number().min(0).max(1).optional(),
+    top_k: z.number().int().positive().optional(),
+    metadata: z
+      .object({
+        user_id: z.string().optional(),
       })
-    )
-    .min(1),
-  max_tokens: z.number().int().positive().optional(),
-  stream: z.boolean().optional(),
-  system: z.string().optional(),
-  temperature: z.number().min(0).max(1).optional(),
-  top_p: z.number().min(0).max(1).optional(),
-  top_k: z.number().int().positive().optional(),
-  metadata: z
-    .object({
-      user_id: z.string().optional(),
-    })
-    .optional()
-    .nullable(),
-})
+      .optional()
+      .nullable(),
+  })
+  .passthrough()
 
 // Cost weighting for budget enforcement only — NOT for raw token counts.
 const HAIKU_COST_MULTIPLIER = 0.25
@@ -40,14 +44,6 @@ function getModelMultiplier(model: string): number {
   if (model.includes('sonnet')) return SONNET_COST_MULTIPLIER
   if (model.includes('opus')) return OPUS_COST_MULTIPLIER
   return SONNET_COST_MULTIPLIER
-}
-
-function buildUpstreamMessagesUrl(baseUrl: string): string {
-  const normalizedBase = baseUrl.trim().replace(/\/+$/, '')
-  if (normalizedBase.endsWith('/v1')) {
-    return `${normalizedBase}/messages`
-  }
-  return `${normalizedBase}/v1/messages`
 }
 
 function getUpstreamApiKey(): string | null {
@@ -112,12 +108,36 @@ async function validateApiKey(apiKey: string) {
   if (key.status === 'PAUSED') {
     return { valid: false, error: createErrorResponse(ErrorCodes.KEY_INACTIVE, 'API key is paused', 403) }
   }
-  if (key.status === 'EXPIRED' || (key.expiresAt && new Date(key.expiresAt) < new Date())) {
+
+  if (isApiKeyPastExpiry(key.expiresAt)) {
     await prisma.apiKey.update({
       where: { id: key.id },
       data: { status: 'EXPIRED' },
     })
-    return { valid: false, error: createErrorResponse(ErrorCodes.KEY_EXPIRED, 'API key has expired', 403) }
+    return {
+      valid: false,
+      error: createErrorResponse(ErrorCodes.KEY_EXPIRED, 'API key has expired', 403, {
+        expires_at: key.expiresAt ? new Date(key.expiresAt).toISOString() : null,
+        hint:
+          'Create keys in the same deployment as ANTHROPIC_BASE_URL. Clear expiry: pnpm db:clear-key-expiry',
+      }),
+    }
+  }
+
+  // Stale EXPIRED row (e.g. expiresAt was extended in DB) — reopen for use.
+  if (key.status === 'EXPIRED') {
+    await prisma.apiKey.update({
+      where: { id: key.id },
+      data: { status: 'ACTIVE' },
+    })
+    const refreshed = await prisma.apiKey.findUnique({
+      where: { id: key.id },
+      include: { plan: true },
+    })
+    if (!refreshed) {
+      return { valid: false, error: createErrorResponse(ErrorCodes.INVALID_API_KEY, 'API key not found', 401) }
+    }
+    return { valid: true, key: refreshed }
   }
 
   return { valid: true, key }
@@ -145,8 +165,12 @@ function estimateTokens(requestBody: z.infer<typeof messageSchema>): TokenEstima
       typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
     raw += Math.ceil(String(content).length / 4)
   }
-  if (requestBody.system) {
-    raw += Math.ceil(requestBody.system.length / 4)
+  if (requestBody.system !== undefined) {
+    const sys =
+      typeof requestBody.system === 'string'
+        ? requestBody.system
+        : JSON.stringify(requestBody.system)
+    raw += Math.ceil(sys.length / 4)
   }
   const multiplier = getModelMultiplier(requestBody.model)
   return { raw, weighted: Math.ceil(raw * multiplier) }
@@ -280,8 +304,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Forward upstream
-    const upstreamUrl = process.env.UPSTREAM_ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
-    const upstreamMessagesUrl = buildUpstreamMessagesUrl(upstreamUrl)
+    const resolvedMessagesUrl = upstreamMessagesUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
     const upstreamApiKey = getUpstreamApiKey()
     if (!upstreamApiKey) {
       return createErrorResponse(
@@ -291,7 +314,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const upstreamResponse = await fetch(upstreamMessagesUrl, {
+    const upstreamResponse = await fetch(resolvedMessagesUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

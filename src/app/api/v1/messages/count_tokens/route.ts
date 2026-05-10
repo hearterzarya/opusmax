@@ -2,16 +2,21 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
+import { upstreamCountTokensUrl } from '@/lib/upstream-anthropic'
 import { z } from 'zod'
 
-const countTokensSchema = z.object({
-  model: z.string().min(1),
-  messages: z.array(z.object({
-    role: z.enum(['user', 'assistant', 'system']),
-    content: z.union([z.string(), z.array(z.any())]),
-  })),
-  system: z.string().optional(),
-})
+const countTokensSchema = z
+  .object({
+    model: z.string().min(1),
+    messages: z.array(
+      z.object({
+        role: z.enum(['user', 'assistant', 'system']),
+        content: z.union([z.string(), z.array(z.any())]),
+      })
+    ),
+    system: z.union([z.string(), z.array(z.any())]).optional(),
+  })
+  .passthrough()
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,13 +27,21 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const validatedBody = countTokensSchema.parse(body)
 
-    // Forward to upstream
-    const upstreamUrl = process.env.UPSTREAM_ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
-    const upstreamResponse = await fetch(`${upstreamUrl}/v1/messages/count_tokens`, {
+    const upstreamKey = (process.env.ANTHROPIC_API_KEY || '').trim()
+    if (!upstreamKey) {
+      return createErrorResponse(
+        ErrorCodes.UPSTREAM_ERROR,
+        'Server misconfigured: ANTHROPIC_API_KEY is missing on the gateway',
+        500
+      )
+    }
+
+    const countUrl = upstreamCountTokensUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
+    const upstreamResponse = await fetch(countUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY!,
+        'x-api-key': upstreamKey,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(validatedBody),

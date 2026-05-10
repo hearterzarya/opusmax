@@ -25,6 +25,13 @@ const fieldClass =
 
 const labelClass = 'text-xs font-medium uppercase tracking-[0.16em] text-white/55'
 
+/** `datetime-local` is wall-clock local; do not use `toISOString().slice(0, 16)` (that is UTC). */
+function minDatetimeLocalFromNow(leadMs: number): string {
+  const d = new Date(Date.now() + leadMs)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 export default function NewApiKeyPage() {
   const [name, setName] = useState('')
   const [rpmLimit, setRpmLimit] = useState('')
@@ -279,7 +286,7 @@ export default function NewApiKeyPage() {
               <input
                 id="expiresAt"
                 type="datetime-local"
-                min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+                min={minDatetimeLocalFromNow(60_000)}
                 value={expiresAt}
                 onChange={(e) => setExpiresAt(e.target.value)}
                 className={fieldClass}

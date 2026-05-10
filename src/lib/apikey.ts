@@ -68,15 +68,21 @@ export interface ApiError {
   }
 }
 
-export function createErrorResponse(code: ErrorCode, message: string, statusCode = 400): Response {
-  return Response.json(
-    {
-      error: {
-        type: code,
-        message,
-        code: statusCode,
-      },
+export function createErrorResponse(
+  code: ErrorCode,
+  message: string,
+  statusCode = 400,
+  meta?: Record<string, unknown>
+): Response {
+  const body: Record<string, unknown> = {
+    error: {
+      type: code,
+      message,
+      code: statusCode,
     },
-    { status: statusCode }
-  )
+  }
+  if (meta && Object.keys(meta).length > 0) {
+    body.meta = meta
+  }
+  return Response.json(body, { status: statusCode })
 }

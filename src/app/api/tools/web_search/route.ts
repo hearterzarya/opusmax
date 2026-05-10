@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
+import { upstreamMessagesUrl } from '@/lib/upstream-anthropic'
 import { z } from 'zod'
 
 const webSearchSchema = z.object({
@@ -21,12 +22,7 @@ export async function POST(request: NextRequest) {
 
     const model = validatedBody.model || 'claude-3-5-sonnet-latest'
     const maxResults = validatedBody.max_results ?? 5
-    const upstreamUrl = (process.env.UPSTREAM_ANTHROPIC_BASE_URL || 'https://api.anthropic.com')
-      .trim()
-      .replace(/\/+$/, '')
-    const messagesUrl = upstreamUrl.endsWith('/v1')
-      ? `${upstreamUrl}/messages`
-      : `${upstreamUrl}/v1/messages`
+    const messagesUrl = upstreamMessagesUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
 
     const upstreamResponse = await fetch(messagesUrl, {
       method: 'POST',

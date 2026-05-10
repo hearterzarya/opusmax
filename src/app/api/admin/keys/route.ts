@@ -9,7 +9,12 @@ const createKeySchema = z.object({
   name: z.string().trim().min(1).max(80),
   rpmLimit: z.coerce.number().int().positive().max(10000).optional(),
   hourlyTokenBudget: z.coerce.bigint().optional(),
-  expiresAt: z.string().datetime().optional(),
+  expiresAt: z
+    .preprocess(
+      (v) => (v === '' || v === null || v === undefined ? undefined : v),
+      z.string().datetime().optional()
+    )
+    .optional(),
 })
 
 export async function GET() {
@@ -43,6 +48,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const data = createKeySchema.parse(body)
     const expiresAt = data.expiresAt ? new Date(data.expiresAt) : null
+
+    if (expiresAt && !Number.isFinite(expiresAt.getTime())) {
+      return createErrorResponse(ErrorCodes.VALIDATION_ERROR, 'Invalid expiresAt value', 400)
+    }
 
     if (expiresAt && expiresAt.getTime() <= Date.now()) {
       return createErrorResponse(

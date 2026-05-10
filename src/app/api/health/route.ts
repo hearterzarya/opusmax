@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { redis } from '@/lib/redis'
+import { upstreamModelsListUrl } from '@/lib/upstream-anthropic'
 
 async function checkRedisHealth(): Promise<{ status: string; latencyMs: number | null }> {
   const start = Date.now()
@@ -30,9 +31,7 @@ async function checkDatabaseHealth(): Promise<{ status: string; latencyMs: numbe
 async function checkUpstreamHealth(): Promise<{ status: string; latencyMs: number | null }> {
   const start = Date.now()
   try {
-    const rawBase = process.env.UPSTREAM_ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
-    const base = rawBase.trim().replace(/\/+$/, '')
-    const url = base.endsWith('/v1') ? `${base}/models` : `${base}/v1/models`
+    const url = upstreamModelsListUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
 
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 5000)

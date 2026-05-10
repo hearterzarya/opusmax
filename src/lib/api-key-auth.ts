@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashApiKey, ErrorCodes, createErrorResponse } from '@/lib/apikey'
+import { isApiKeyPastExpiry } from '@/lib/api-key-expiry'
 
 export function extractAuthKey(request: NextRequest): string | null {
   const apiKey = request.headers.get('x-api-key')
@@ -54,12 +55,31 @@ export async function validateActiveApiKeyFromRequest(request: NextRequest): Pro
       response: createErrorResponse(ErrorCodes.KEY_INACTIVE, 'API key is paused', 403),
     }
   }
-  if (key.status === 'EXPIRED' || (key.expiresAt && new Date(key.expiresAt) < new Date())) {
+
+  if (isApiKeyPastExpiry(key.expiresAt)) {
+    await prisma.apiKey.update({
+      where: { id: key.id },
+      data: { status: 'EXPIRED' },
+    })
     return {
       ok: false,
-      response: createErrorResponse(ErrorCodes.KEY_EXPIRED, 'API key has expired', 403),
+      response: createErrorResponse(ErrorCodes.KEY_EXPIRED, 'API key has expired', 403, {
+        expires_at: key.expiresAt ? new Date(key.expiresAt).toISOString() : null,
+        hint:
+          'Create keys in the same deployment as ANTHROPIC_BASE_URL. Clear expiry: pnpm db:clear-key-expiry',
+      }),
     }
   }
 
-  return { ok: true, key }
+  if (key.status === 'EXPIRED') {
+    await prisma.apiKey.update({
+      where: { id: key.id },
+      data: { status: 'ACTIVE' },
+    })
+  }
+
+  return {
+    ok: true,
+    key: { ...key, status: key.status === 'EXPIRED' ? 'ACTIVE' : key.status },
+  }
 }
