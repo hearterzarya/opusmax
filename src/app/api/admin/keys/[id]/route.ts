@@ -6,6 +6,11 @@ import { createErrorResponse, ErrorCodes, generateKeyPair } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { resetRollingWindowQuota } from '@/lib/quota'
 
+const WINDOW_PLAN_BUDGETS = {
+  max5x: 5_000_000n,
+  max20x: 20_000_000n,
+} as const
+
 const patchBodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('pause') }),
   z.object({ action: z.literal('activate') }),
@@ -16,6 +21,14 @@ const patchBodySchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('set_expiry'),
     expiresAt: z.union([z.string().datetime(), z.null()]),
+  }),
+  z.object({
+    action: z.literal('set_window_plan'),
+    plan: z.enum(['custom', 'max5x', 'max20x']),
+    // For custom plan only. Null/undefined => disable window limit (0).
+    hourlyTokenBudget: z
+      .union([z.coerce.bigint(), z.null()])
+      .optional(),
   }),
 ])
 
@@ -95,6 +108,52 @@ export async function PATCH(
               keyId: key.id,
               keyName: key.name,
               expiresAt: key.expiresAt?.toISOString() ?? null,
+            },
+          },
+        })
+        .catch((error) => console.warn('Audit log write failed:', error))
+
+      return NextResponse.json({ success: true, key })
+    }
+
+    if (patch.action === 'set_window_plan') {
+      if (existing.status === 'REVOKED') {
+        return createErrorResponse(ErrorCodes.KEY_INACTIVE, 'Revoked keys cannot be updated', 409)
+      }
+
+      const nextBudget =
+        patch.plan === 'custom'
+          ? patch.hourlyTokenBudget === null || patch.hourlyTokenBudget === undefined
+            ? 0n
+            : patch.hourlyTokenBudget
+          : WINDOW_PLAN_BUDGETS[patch.plan]
+
+      if (nextBudget < 0n) {
+        return createErrorResponse(
+          ErrorCodes.VALIDATION_ERROR,
+          'Hourly budget must be a non-negative integer (or null to disable)',
+          400
+        )
+      }
+
+      const key = await prisma.apiKey.update({
+        where: { id: existing.id },
+        data: {
+          hourlyTokenBudget: nextBudget,
+        },
+        select: { id: true, name: true, status: true, hourlyTokenBudget: true },
+      })
+
+      prisma.auditLog
+        .create({
+          data: {
+            adminId: session.id,
+            action: 'SET_API_KEY_WINDOW_PLAN',
+            details: {
+              keyId: key.id,
+              keyName: key.name,
+              plan: patch.plan,
+              hourlyTokenBudget: key.hourlyTokenBudget?.toString() ?? null,
             },
           },
         })
