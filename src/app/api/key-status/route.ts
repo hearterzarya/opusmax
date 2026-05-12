@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { hashApiKey } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { checkRateLimit } from '@/lib/redis'
-import { getRollingWindowQuotaState } from '@/lib/quota'
+import { getRollingWindowUsageFromUsageLogs } from '@/lib/quota'
 
 function getClientIp(request: NextRequest): string {
   const fwd = request.headers.get('x-forwarded-for')
@@ -59,11 +59,17 @@ export async function GET(request: NextRequest) {
 
     const quotaState =
       key.hourlyTokenBudget && key.hourlyTokenBudget > 0n
-        ? await getRollingWindowQuotaState(key.id, key.hourlyTokenBudget)
-        : { used: 0, remaining: 0, resetAt: null, blocked: false }
+        ? await getRollingWindowUsageFromUsageLogs(key.id, key.hourlyTokenBudget)
+        : {
+            used: 0,
+            remaining: 0,
+            resetAt: null,
+            blocked: false,
+            windowStartedAt: null,
+          }
 
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    const [requests24h, allTimeRequests, lastLog] = await Promise.all([
+    const [requests24h, allTimeRequests, lastLog, recentActivity] = await Promise.all([
       prisma.usageLog.count({
         where: {
           apiKeyId: key.id,
@@ -80,11 +86,22 @@ export async function GET(request: NextRequest) {
             orderBy: { timestamp: 'desc' },
             select: { timestamp: true },
           }),
+      prisma.usageLog.findMany({
+        where: { apiKeyId: key.id },
+        orderBy: { timestamp: 'desc' },
+        take: 50,
+        select: {
+          timestamp: true,
+          model: true,
+          inputTokens: true,
+          outputTokens: true,
+          totalTokens: true,
+          statusCode: true,
+          latencyMs: true,
+          errorType: true,
+        },
+      }),
     ])
-
-    const windowStartedAt = quotaState.resetAt
-      ? new Date(new Date(quotaState.resetAt).getTime() - 5 * 60 * 60 * 1000).toISOString()
-      : null
 
     return NextResponse.json({
       exists: true,
@@ -96,12 +113,23 @@ export async function GET(request: NextRequest) {
       hourlyUsage: quotaState.used,
       hourlyBudget: Number(key.hourlyTokenBudget) || null,
       hourlyRemaining: key.hourlyTokenBudget ? quotaState.remaining : null,
-      windowStartedAt,
+      windowStartedAt: quotaState.windowStartedAt,
       windowResetAt: quotaState.resetAt,
       lastUsed: key.lastUsedAt?.toISOString() || lastLog?.timestamp.toISOString() || null,
       rpmLimit: key.rpmLimit,
       requests24h,
       allTimeRequests,
+      usageSource: 'usage_logs',
+      activity: recentActivity.map((row) => ({
+        at: row.timestamp.toISOString(),
+        model: row.model,
+        inputTokens: row.inputTokens,
+        outputTokens: row.outputTokens,
+        totalTokens: row.totalTokens,
+        statusCode: row.statusCode,
+        latencyMs: row.latencyMs,
+        errorType: row.errorType,
+      })),
     })
 
   } catch (error) {

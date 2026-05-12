@@ -16,19 +16,36 @@ import { SiteHeader } from '@/components/site/site-header'
 import { SiteFooter } from '@/components/site/site-footer'
 import { compactNumber } from '@/lib/utils'
 
+interface UsageActivityRow {
+  at: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  statusCode: number
+  latencyMs: number
+  errorType: string | null
+}
+
 interface KeyStatus {
   exists: boolean
   status: string | null
   quotaBlocked?: boolean
   name: string | null
+  createdAt?: string | null
   expiresAt: string | null
   hourlyUsage: number | null
   hourlyBudget: number | null
   hourlyRemaining?: number | null
   windowResetAt: string | null
+  windowStartedAt?: string | null
   lastUsed: string | null
   rpmLimit: number | null
-  recentRequests: number | null
+  requests24h?: number | null
+  allTimeRequests?: number | null
+  usageSource?: string
+  activity?: UsageActivityRow[]
+  recentRequests?: number | null
 }
 
 function extractErrorMessage(value: unknown, fallback: string): string {
@@ -140,8 +157,9 @@ export default function KeyStatusPage() {
         !previous ||
         previous.hourlyUsage !== next.hourlyUsage ||
         previous.windowResetAt !== next.windowResetAt ||
-        previous.recentRequests !== next.recentRequests ||
-        previous.lastUsed !== next.lastUsed
+        previous.requests24h !== next.requests24h ||
+        previous.lastUsed !== next.lastUsed ||
+        (previous.activity?.[0]?.at ?? '') !== (next.activity?.[0]?.at ?? '')
       prevStatusRef.current = next
       setStatus(next)
       setLastUpdatedAt(Date.now())
@@ -334,7 +352,11 @@ export default function KeyStatusPage() {
                   </div>
 
                   <div className="grid gap-6 border-t border-white/10 pt-6 sm:grid-cols-2 lg:grid-cols-4">
-                    <Stat label="Created" big="—" sub="Not exposed by gateway" />
+                    <Stat
+                      label="Created"
+                      big={status.createdAt ? formatTimestamp(status.createdAt) : '—'}
+                      sub="From gateway database"
+                    />
                     <Stat
                       label="Expires"
                       big={status.expiresAt ? 'Set' : 'No expiry'}
@@ -375,6 +397,10 @@ export default function KeyStatusPage() {
                       {windowCountdown || 'Starts after first request'}
                     </span>
                   </p>
+                  <p className="mt-1 text-xs text-white/45">
+                    Window totals use logged token usage (stable). They update after each request completes, not on
+                    every streaming chunk.
+                  </p>
 
                   <div className="mt-5 grid gap-2 text-sm md:grid-cols-2">
                     <p className="text-white/55">
@@ -409,9 +435,9 @@ export default function KeyStatusPage() {
 
               <section className="grid gap-4 md:grid-cols-3">
                 <MetricCard
-                  label="Total requests"
-                  value={status.recentRequests !== null ? compactNumber(status.recentRequests) : '0'}
-                  sub="24h window"
+                  label="Requests (24h)"
+                  value={compactNumber(status.requests24h ?? 0)}
+                  sub={`All-time: ${compactNumber(status.allTimeRequests ?? 0)}`}
                 />
                 <MetricCard
                   label="Window reset"
@@ -425,6 +451,54 @@ export default function KeyStatusPage() {
                   capitalize
                 />
               </section>
+
+              {status.activity && status.activity.length > 0 && (
+                <section className="glass-strong rounded-2xl p-6">
+                  <h3 className="font-display tracking-display text-xl font-semibold text-white">
+                    Recent request log
+                  </h3>
+                  <p className="mt-1 text-sm text-white/55">Latest completed calls through this gateway (newest first).</p>
+                  <div className="mt-4 overflow-x-auto rounded-xl border border-white/10">
+                    <table className="w-full min-w-[720px] text-left text-sm">
+                      <thead className="border-b border-white/10 bg-white/[0.03] font-mono text-[10px] uppercase tracking-[0.18em] text-white/50">
+                        <tr>
+                          <th className="px-3 py-2">Time</th>
+                          <th className="px-3 py-2">Model</th>
+                          <th className="px-3 py-2 text-right">In</th>
+                          <th className="px-3 py-2 text-right">Out</th>
+                          <th className="px-3 py-2 text-right">Total</th>
+                          <th className="px-3 py-2 text-right">HTTP</th>
+                          <th className="px-3 py-2 text-right">ms</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5 text-white/80">
+                        {status.activity.map((row, idx) => (
+                          <tr key={`${idx}-${row.at}-${row.model}-${row.statusCode}`} className="hover:bg-white/[0.03]">
+                            <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-white/70">
+                              {formatTimestamp(row.at)}
+                            </td>
+                            <td className="max-w-[220px] truncate px-3 py-2 font-mono text-xs">{row.model}</td>
+                            <td className="px-3 py-2 text-right font-mono text-xs">{compactNumber(row.inputTokens)}</td>
+                            <td className="px-3 py-2 text-right font-mono text-xs">{compactNumber(row.outputTokens)}</td>
+                            <td className="px-3 py-2 text-right font-mono text-xs text-white">
+                              {compactNumber(row.totalTokens)}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono text-xs">
+                              {row.statusCode}
+                              {row.errorType ? (
+                                <span className="ml-1 text-rose-300/90" title={row.errorType}>
+                                  *
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono text-xs">{row.latencyMs}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
             </>
           )}
         </div>

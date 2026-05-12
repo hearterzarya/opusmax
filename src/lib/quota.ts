@@ -338,3 +338,50 @@ export async function getRollingWindowQuotaState(
     blocked: normalizedUsed >= numericBudget,
   }
 }
+
+/**
+ * Dashboard-friendly rolling window totals from `usage_logs` (completed requests only).
+ * Uses the same effective window start as quota enforcement (5h from now, or last admin reset).
+ * Avoids Redis reservation/settle jitter in the public key-status UI.
+ */
+export async function getRollingWindowUsageFromUsageLogs(
+  keyId: string,
+  budget: bigint,
+  nowMs: number = Date.now()
+): Promise<{
+  used: number
+  remaining: number
+  resetAt: string | null
+  blocked: boolean
+  windowStartedAt: string | null
+}> {
+  const numericBudget = Number(budget)
+  if (!Number.isFinite(numericBudget) || numericBudget <= 0) {
+    return { used: 0, remaining: 0, resetAt: null, blocked: false, windowStartedAt: null }
+  }
+
+  const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
+  const effectiveWindowStartMs = Math.max(nowMs - QUOTA_WINDOW_MS, resetMarkerMs ?? 0)
+  const since = new Date(effectiveWindowStartMs)
+
+  const [agg, first] = await Promise.all([
+    prisma.usageLog.aggregate({
+      where: { apiKeyId: keyId, timestamp: { gte: since } },
+      _sum: { totalTokens: true },
+    }),
+    prisma.usageLog.findFirst({
+      where: { apiKeyId: keyId, timestamp: { gte: since } },
+      orderBy: { timestamp: 'asc' },
+      select: { timestamp: true },
+    }),
+  ])
+
+  const rawUsed = agg._sum.totalTokens ?? 0
+  const used = Math.min(clampNonNegative(rawUsed), numericBudget)
+  const remaining = clampNonNegative(numericBudget - used)
+  const windowStartedAt = first ? first.timestamp.toISOString() : null
+  const resetAt = first ? new Date(first.timestamp.getTime() + QUOTA_WINDOW_MS).toISOString() : null
+  const blocked = used >= numericBudget
+
+  return { used, remaining, resetAt, blocked, windowStartedAt }
+}
