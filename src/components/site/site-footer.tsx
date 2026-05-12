@@ -4,7 +4,7 @@ export function SiteFooter() {
   return (
     <footer className="relative mt-20 border-t border-white/5 bg-background/40 backdrop-blur-xl">
       <div className="divider-grad absolute inset-x-0 top-0" />
-      <div className="mx-auto grid max-w-6xl gap-10 px-6 py-12 md:grid-cols-[1.4fr_repeat(3,_1fr)]">
+      <div className="mx-auto grid max-w-6xl gap-10 px-6 py-12 md:grid-cols-[1.4fr_repeat(2,_1fr)]">
         <div className="space-y-3">
           <div className="flex items-center gap-2.5">
             <span className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg">
@@ -34,12 +34,6 @@ export function SiteFooter() {
             { label: 'Docs', href: '/docs' },
             { label: 'Usage', href: '/key-status' },
             { label: 'Status', href: '/status' },
-          ]}
-        />
-        <FooterColumn
-          title="Account"
-          items={[
-            { label: 'Admin', href: '/admin/login' },
           ]}
         />
         <FooterColumn

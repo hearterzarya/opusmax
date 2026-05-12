@@ -138,7 +138,7 @@ export default function HomePage() {
 
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
-                href="/admin/login"
+                href="/docs"
                 className="btn-grad inline-flex h-12 items-center justify-center gap-2 rounded-full px-7 text-sm font-medium"
               >
                 Start building <ArrowRight className="h-4 w-4" />
@@ -342,10 +342,10 @@ export default function HomePage() {
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
-                href="/admin/login"
+                href="/docs"
                 className="btn-grad inline-flex h-12 items-center justify-center gap-2 rounded-full px-8 text-sm font-medium"
               >
-                Launch admin <ArrowRight className="h-4 w-4" />
+                Read documentation <ArrowRight className="h-4 w-4" />
               </Link>
               <Link
                 href="/key-status"

@@ -1,5 +1,4 @@
 import Link from 'next/link'
-import { ArrowUpRight } from 'lucide-react'
 
 interface SiteHeaderProps {
   active?: 'home' | 'docs' | 'status' | 'usage'
@@ -14,7 +13,7 @@ const links: { key: NonNullable<SiteHeaderProps['active']>; label: string; href:
 export function SiteHeader({ active }: SiteHeaderProps) {
   return (
     <header className="sticky top-0 z-40 border-b border-white/5 bg-background/60 backdrop-blur-xl">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-6 px-6">
         <Link href="/" className="group flex items-center gap-2.5">
           <span className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl">
             <span
@@ -32,7 +31,7 @@ export function SiteHeader({ active }: SiteHeaderProps) {
           </span>
         </Link>
 
-        <nav className="hidden items-center gap-1 md:flex">
+        <nav className="ml-auto flex flex-wrap items-center justify-end gap-1">
           {links.map((l) => {
             const isActive = active === l.key
             return (
@@ -51,13 +50,6 @@ export function SiteHeader({ active }: SiteHeaderProps) {
             )
           })}
         </nav>
-
-        <Link
-          href="/admin/login"
-          className="btn-grad inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-medium"
-        >
-          Admin <ArrowUpRight className="h-3.5 w-3.5" />
-        </Link>
       </div>
     </header>
   )
