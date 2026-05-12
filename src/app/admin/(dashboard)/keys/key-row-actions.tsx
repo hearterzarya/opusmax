@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CalendarClock, Pause, Play, RefreshCw, RotateCcw, Trash2, Zap } from 'lucide-react'
+import { CalendarClock, Pause, Play, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import {
   AlertDialog,
@@ -23,15 +23,8 @@ interface KeyRowActionsProps {
 
 async function updateKeyStatus(
   keyId: string,
-  action:
-    | 'pause'
-    | 'activate'
-    | 'reset_quota'
-    | 'rotate'
-    | 'delete'
-    | 'set_expiry'
-    | 'set_window_plan',
-  extra?: { expiresAt?: string | null; plan?: 'custom' | 'max5x' | 'max20x'; hourlyTokenBudget?: string | null }
+  action: 'pause' | 'activate' | 'reset_quota' | 'rotate' | 'delete' | 'set_expiry',
+  extra?: { expiresAt: string | null }
 ) {
   const response = await fetch(`/api/admin/keys/${keyId}`, {
     method: 'PATCH',
@@ -39,13 +32,7 @@ async function updateKeyStatus(
     body: JSON.stringify(
       action === 'set_expiry'
         ? { action: 'set_expiry', expiresAt: extra?.expiresAt ?? null }
-        : action === 'set_window_plan'
-          ? {
-              action: 'set_window_plan',
-              plan: extra?.plan ?? 'custom',
-              hourlyTokenBudget: extra?.hourlyTokenBudget ?? null,
-            }
-          : { action }
+        : { action }
     ),
   })
   const payload = (await response.json().catch(() => null)) as
@@ -96,36 +83,6 @@ export function KeyRowActions({ keyId, status }: KeyRowActionsProps) {
     }
   }
 
-  const runSetWindowPlan = async () => {
-    const input = window.prompt(
-      'Set 5-hour window plan: enter 5 for 5x, 20 for 20x, or enter a custom token budget number (0 = disable limit).',
-      '20'
-    )
-    if (input === null) return
-    const trimmed = input.trim()
-    if (!trimmed) return
-
-    const n = Number(trimmed)
-    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
-      window.alert('Please enter a whole number >= 0 (example: 5, 20, 5000000, or 0).')
-      return
-    }
-
-    const plan: 'custom' | 'max5x' | 'max20x' = n === 5 ? 'max5x' : n === 20 ? 'max20x' : 'custom'
-    const hourlyTokenBudget = plan === 'custom' ? String(n) : null
-
-    try {
-      setLoadingAction('set_window_plan')
-      await updateKeyStatus(keyId, 'set_window_plan', { plan, hourlyTokenBudget })
-      router.refresh()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to set window plan'
-      window.alert(message)
-    } finally {
-      setLoadingAction(null)
-    }
-  }
-
   const run = async (action: 'pause' | 'activate' | 'reset_quota' | 'rotate' | 'delete') => {
     try {
       setLoadingAction(action)
@@ -156,16 +113,6 @@ export function KeyRowActions({ keyId, status }: KeyRowActionsProps) {
   return (
     <>
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          disabled={isRevoked || !!loadingAction}
-          onClick={() => runSetWindowPlan()}
-          className="inline-flex items-center gap-1 rounded-md border border-fuchsia-400/25 bg-fuchsia-400/10 px-2.5 py-1 text-xs text-fuchsia-200 disabled:cursor-not-allowed disabled:opacity-50"
-          title="Change the 5-hour window budget (5x / 20x / custom)"
-        >
-          <Zap className="h-3 w-3" />
-          Plan
-        </button>
         <button
           type="button"
           disabled={isRevoked || !!loadingAction}
