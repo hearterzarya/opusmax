@@ -3,57 +3,13 @@ import { ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
 import { upstreamModelsListUrl } from '@/lib/upstream-anthropic'
-import { getAnthropicModelsListFallback } from '@/lib/anthropic-models-fallback'
+import {
+  getAnthropicModelsListFallback,
+  mergeDefaultModelsWithUpstream,
+} from '@/lib/anthropic-models-fallback'
 
-function mergeAnthropicModelsPayload(upstreamBody: unknown): unknown {
-  const merge =
-    process.env.GATEWAY_MERGE_MODEL_FALLBACK !== '0' &&
-    process.env.GATEWAY_MERGE_MODEL_FALLBACK !== 'false'
-
-  if (!merge) return upstreamBody
-
-  const fb = getAnthropicModelsListFallback()
-  const fbRows = fb.data as Array<Record<string, unknown>>
-
-  if (!upstreamBody || typeof upstreamBody !== 'object') {
-    return fb
-  }
-
-  const obj = upstreamBody as {
-    data?: unknown[]
-    first_id?: string
-    last_id?: string
-    has_more?: boolean
-  }
-
-  const upstreamData = Array.isArray(obj.data) ? obj.data : []
-
-  const idOf = (row: unknown): string | null => {
-    if (row && typeof row === 'object' && 'id' in row) {
-      const id = (row as { id: unknown }).id
-      return typeof id === 'string' ? id : null
-    }
-    return null
-  }
-
-  const seen = new Set<string>()
-  for (const row of upstreamData) {
-    const id = idOf(row)
-    if (id) seen.add(id)
-  }
-
-  const merged = [...upstreamData]
-  for (const row of fbRows) {
-    const id = typeof row.id === 'string' ? row.id : null
-    if (!id || seen.has(id)) continue
-    seen.add(id)
-    merged.push(row)
-  }
-
-  return {
-    ...obj,
-    data: merged,
-  }
+function envTruthy(v: string | undefined): boolean {
+  return v === '1' || v === 'true' || v === 'yes'
 }
 
 const corsHeaders: Record<string, string> = {
@@ -68,11 +24,32 @@ export async function GET(request: NextRequest) {
     if (!auth.ok) return auth.response
     const key = auth.key
 
+    const bumpLastUsed = () => {
+      prisma.apiKey
+        .update({
+          where: { id: key.id },
+          data: { lastUsedAt: new Date() },
+        })
+        .catch(console.error)
+    }
+
+    const staticBody = getAnthropicModelsListFallback() as Record<string, unknown>
+    const fetchUpstream = envTruthy(process.env.GATEWAY_FETCH_UPSTREAM_MODELS)
     const upstreamKey = (process.env.ANTHROPIC_API_KEY || '').trim()
+    const disableStaticOnUpstreamFailure =
+      process.env.GATEWAY_DISABLE_MODELS_FALLBACK === '1'
+
+    if (!fetchUpstream) {
+      bumpLastUsed()
+      return NextResponse.json(staticBody, {
+        headers: { ...corsHeaders, 'x-opusx-models': 'static' },
+      })
+    }
+
     if (!upstreamKey) {
       return createErrorResponse(
         ErrorCodes.UPSTREAM_ERROR,
-        'Server misconfigured: ANTHROPIC_API_KEY is missing on the gateway (set it in Vercel env)',
+        'GATEWAY_FETCH_UPSTREAM_MODELS is enabled but ANTHROPIC_API_KEY is missing on the gateway',
         500
       )
     }
@@ -89,15 +66,6 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    const bumpLastUsed = () => {
-      prisma.apiKey
-        .update({
-          where: { id: key.id },
-          data: { lastUsedAt: new Date() },
-        })
-        .catch(console.error)
-    }
-
     if (!upstreamResponse.ok) {
       let preview = ''
       try {
@@ -107,25 +75,23 @@ export async function GET(request: NextRequest) {
       }
       console.error('[models] upstream', upstreamResponse.status, modelsUrl, preview)
 
-      const fallbackDisabled = process.env.GATEWAY_DISABLE_MODELS_FALLBACK === '1'
-      if (!fallbackDisabled) {
-        bumpLastUsed()
-        const body = getAnthropicModelsListFallback()
-        return NextResponse.json(body, {
-          headers: {
-            ...corsHeaders,
-            'x-opusx-models': 'fallback',
-            'x-opusx-upstream-status': String(upstreamResponse.status),
-          },
-        })
+      if (disableStaticOnUpstreamFailure) {
+        return createErrorResponse(
+          ErrorCodes.UPSTREAM_ERROR,
+          `Anthropic models request failed (${upstreamResponse.status}). Unset GATEWAY_DISABLE_MODELS_FALLBACK to allow the built-in catalog when upstream fails.`,
+          502,
+          { upstream_status: upstreamResponse.status, upstream_body_preview: preview || undefined }
+        )
       }
 
-      return createErrorResponse(
-        ErrorCodes.UPSTREAM_ERROR,
-        `Anthropic models request failed (${upstreamResponse.status}). Set ANTHROPIC_API_KEY on Vercel or unset GATEWAY_DISABLE_MODELS_FALLBACK to allow a built-in model list.`,
-        502,
-        { upstream_status: upstreamResponse.status, upstream_body_preview: preview || undefined }
-      )
+      bumpLastUsed()
+      return NextResponse.json(staticBody, {
+        headers: {
+          ...corsHeaders,
+          'x-opusx-models': 'static',
+          'x-opusx-upstream-status': String(upstreamResponse.status),
+        },
+      })
     }
 
     let data: unknown
@@ -133,7 +99,7 @@ export async function GET(request: NextRequest) {
       data = await upstreamResponse.json()
     } catch {
       console.error('[models] upstream returned non-JSON')
-      if (process.env.GATEWAY_DISABLE_MODELS_FALLBACK === '1') {
+      if (disableStaticOnUpstreamFailure) {
         return createErrorResponse(
           ErrorCodes.UPSTREAM_ERROR,
           'Upstream models response was not valid JSON',
@@ -141,14 +107,20 @@ export async function GET(request: NextRequest) {
         )
       }
       bumpLastUsed()
-      return NextResponse.json(getAnthropicModelsListFallback(), {
-        headers: { ...corsHeaders, 'x-opusx-models': 'fallback', 'x-opusx-upstream-status': 'invalid-json' },
+      return NextResponse.json(staticBody, {
+        headers: {
+          ...corsHeaders,
+          'x-opusx-models': 'static',
+          'x-opusx-upstream-status': 'invalid-json',
+        },
       })
     }
 
     bumpLastUsed()
-    const merged = mergeAnthropicModelsPayload(data)
-    return NextResponse.json(merged, { headers: corsHeaders })
+    const merged = mergeDefaultModelsWithUpstream(staticBody, data)
+    return NextResponse.json(merged, {
+      headers: { ...corsHeaders, 'x-opusx-models': 'merged' },
+    })
   } catch (error) {
     console.error('Models endpoint error:', error)
     return createErrorResponse(ErrorCodes.UPSTREAM_ERROR, 'An error occurred', 500)

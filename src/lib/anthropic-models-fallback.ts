@@ -1,7 +1,10 @@
 /**
- * Anthropic-compatible GET /v1/models payload when upstream list fails.
- * Lets clients (e.g. Cursor, Claude Desktop) populate the model picker.
- * Actual routing still uses your server's ANTHROPIC_API_KEY — only IDs your key can call will work upstream.
+ * Default Anthropic-compatible GET /v1/models payload for this gateway.
+ * Served by default so clients (Cursor, Claude Desktop, etc.) always get a full picker
+ * without depending on Anthropic's list endpoint.
+ *
+ * Optional: set GATEWAY_FETCH_UPSTREAM_MODELS=1 to replace rows with Anthropic's payload for
+ * the same model ids (no extra models are appended).
  *
  * Shape follows https://platform.claude.com/docs/en/api/models/list
  */
@@ -32,43 +35,21 @@ function modelEntry(
   }
 }
 
-/** Ordered newest-ish first; deduped by id. Covers Claude 4.x, 3.7, 3.5, 3.x + common `-latest` aliases. */
+/** Only these models are advertised and kept when merging upstream /v1/models. */
 const FALLBACK_MODEL_ROWS: ReadonlyArray<{
   id: string
   name: string
   maxIn: number
   maxOut: number
 }> = [
-  // Claude 4.x (aliases clients often request)
-  { id: 'claude-opus-4-7', name: 'Claude Opus 4.7', maxIn: 200_000, maxOut: 32_000 },
-  { id: 'claude-opus-4-5-20250514', name: 'Claude Opus 4.5', maxIn: 200_000, maxOut: 32_000 },
-  { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', maxIn: 200_000, maxOut: 32_000 },
-  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', maxIn: 200_000, maxOut: 64_000 },
-  { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', maxIn: 200_000, maxOut: 64_000 },
-  { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', maxIn: 200_000, maxOut: 64_000 },
-
-  // Claude 3.7 Sonnet (some SDKs / previews)
-  { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet', maxIn: 200_000, maxOut: 64_000 },
-
-  // Claude 3.5 (dated releases + latest aliases)
-  { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (20241022)', maxIn: 200_000, maxOut: 8192 },
-  { id: 'claude-3-5-sonnet-20240620', name: 'Claude 3.5 Sonnet (20240620)', maxIn: 200_000, maxOut: 8192 },
-  { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', maxIn: 200_000, maxOut: 8192 },
-  { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet (latest alias)', maxIn: 200_000, maxOut: 8192 },
-  { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku (latest alias)', maxIn: 200_000, maxOut: 8192 },
-
-  // Claude 3 family (legacy but still referenced)
-  { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', maxIn: 200_000, maxOut: 4096 },
-  { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet', maxIn: 200_000, maxOut: 4096 },
-  { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', maxIn: 200_000, maxOut: 4096 },
-  { id: 'claude-3-opus-latest', name: 'Claude 3 Opus (latest alias)', maxIn: 200_000, maxOut: 4096 },
-  { id: 'claude-3-sonnet-latest', name: 'Claude 3 Sonnet (latest alias)', maxIn: 200_000, maxOut: 4096 },
-  { id: 'claude-3-haiku-latest', name: 'Claude 3 Haiku (latest alias)', maxIn: 200_000, maxOut: 4096 },
-
-  // SDK / playground shorthand sometimes seen
-  { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet (short)', maxIn: 200_000, maxOut: 8192 },
-  { id: 'claude-3-5-haiku', name: 'Claude 3.5 Haiku (short)', maxIn: 200_000, maxOut: 8192 },
+  { id: 'claude-opus-4-7', name: 'Opus 4.7', maxIn: 200_000, maxOut: 32_000 },
+  { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', maxIn: 200_000, maxOut: 64_000 },
+  { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', maxIn: 200_000, maxOut: 64_000 },
 ]
+
+function gatewayAllowedModelIds(): ReadonlySet<string> {
+  return new Set(FALLBACK_MODEL_ROWS.map((r) => r.id))
+}
 
 export function getAnthropicModelsListFallback(): Record<string, unknown> {
   const seen = new Set<string>()
@@ -87,4 +68,53 @@ export function getAnthropicModelsListFallback(): Record<string, unknown> {
     last_id: ids[ids.length - 1],
     has_more: false,
   }
+}
+
+function idOfModelRow(row: unknown): string | null {
+  if (row && typeof row === 'object' && 'id' in row) {
+    const id = (row as { id: unknown }).id
+    return typeof id === 'string' ? id : null
+  }
+  return null
+}
+
+/** Same rows and order as the default catalog; overwrite with upstream rows only for allowed ids. */
+export function mergeDefaultModelsWithUpstream(
+  defaultBody: Record<string, unknown>,
+  upstreamBody: unknown
+): Record<string, unknown> {
+  const defaultData = Array.isArray(defaultBody.data)
+    ? (defaultBody.data as Array<Record<string, unknown>>)
+    : []
+  const allowed = gatewayAllowedModelIds()
+  let merged: Array<Record<string, unknown>> = [...defaultData]
+
+  if (upstreamBody && typeof upstreamBody === 'object') {
+    const upstreamData = (upstreamBody as { data?: unknown[] }).data
+    if (Array.isArray(upstreamData)) {
+      const upstreamById = new Map<string, Record<string, unknown>>()
+      for (const row of upstreamData) {
+        const id = idOfModelRow(row)
+        if (!id || !allowed.has(id)) continue
+        if (!row || typeof row !== 'object') continue
+        upstreamById.set(id, row as Record<string, unknown>)
+      }
+      merged = merged.map((row) => {
+        const id = idOfModelRow(row)
+        if (!id) return row
+        const u = upstreamById.get(id)
+        return u ?? row
+      })
+    }
+  }
+
+  const ids = merged.map((m) => String(m.id))
+  const out = {
+    ...(upstreamBody && typeof upstreamBody === 'object' ? (upstreamBody as object) : defaultBody),
+    data: merged,
+    first_id: ids[0],
+    last_id: ids[ids.length - 1],
+    has_more: false,
+  }
+  return out
 }
