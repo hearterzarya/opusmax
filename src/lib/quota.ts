@@ -3,6 +3,8 @@ import { redis } from '@/lib/redis'
 
 export const QUOTA_WINDOW_SECONDS = 5 * 60 * 60
 const QUOTA_WINDOW_MS = QUOTA_WINDOW_SECONDS * 1000
+/** Keep reset marker long enough for DB/UI alignment; rolling enforcement reads it on every request. */
+export const RESET_MARKER_TTL_SECONDS = 30 * 24 * 60 * 60
 const HAS_REAL_REDIS =
   Boolean(process.env.REDIS_URL?.trim()) &&
   !(process.env.REDIS_URL?.includes('xxx.upstash.io') ?? false)
@@ -16,7 +18,8 @@ type ReserveQuotaResult = {
 }
 
 const RESERVE_QUOTA_LUA = `
-local key = KEYS[1]
+local rolling = KEYS[1]
+local reset_key = KEYS[2]
 local now = tonumber(ARGV[1])
 local window_ms = tonumber(ARGV[2])
 local budget = tonumber(ARGV[3])
@@ -24,8 +27,15 @@ local requested = tonumber(ARGV[4])
 local member = ARGV[5]
 local ttl_seconds = tonumber(ARGV[6])
 
-redis.call('ZREMRANGEBYSCORE', key, 0, now - window_ms)
-local entries = redis.call('ZRANGE', key, 0, -1)
+local marker_raw = redis.call('GET', reset_key)
+local marker_ms = 0
+if marker_raw then marker_ms = tonumber(marker_raw) or 0 end
+local sliding_cut = now - window_ms
+local floor_ms = sliding_cut
+if marker_ms > sliding_cut then floor_ms = marker_ms end
+redis.call('ZREMRANGEBYSCORE', rolling, '-inf', floor_ms - 1)
+
+local entries = redis.call('ZRANGE', rolling, 0, -1)
 local used = 0
 for _, entry in ipairs(entries) do
   local sep = string.find(entry, ':')
@@ -39,7 +49,7 @@ for _, entry in ipairs(entries) do
 end
 
 if used + requested > budget then
-  local first = redis.call('ZRANGE', key, 0, 0)[1]
+  local first = redis.call('ZRANGE', rolling, 0, 0)[1]
   local reset_at = now + window_ms
   if first then
     local sep = string.find(first, ':')
@@ -55,11 +65,11 @@ if used + requested > budget then
   return {0, used, remaining, reset_at}
 end
 
-redis.call('ZADD', key, now, member)
-redis.call('EXPIRE', key, ttl_seconds)
+redis.call('ZADD', rolling, now, member)
+redis.call('EXPIRE', rolling, ttl_seconds)
 
 local new_used = used + requested
-local first_after = redis.call('ZRANGE', key, 0, 0)[1]
+local first_after = redis.call('ZRANGE', rolling, 0, 0)[1]
 local reset_at = now + window_ms
 if first_after then
   local sep = string.find(first_after, ':')
@@ -76,19 +86,27 @@ return {1, new_used, remaining, reset_at}
 `
 
 const SETTLE_QUOTA_LUA = `
-local key = KEYS[1]
+local rolling = KEYS[1]
+local reset_key = KEYS[2]
 local now = tonumber(ARGV[1])
 local window_ms = tonumber(ARGV[2])
 local budget = tonumber(ARGV[3])
 local delta = tonumber(ARGV[4])
 local ttl_seconds = tonumber(ARGV[5])
 
-redis.call('ZREMRANGEBYSCORE', key, 0, now - window_ms)
+local marker_raw = redis.call('GET', reset_key)
+local marker_ms = 0
+if marker_raw then marker_ms = tonumber(marker_raw) or 0 end
+local sliding_cut = now - window_ms
+local floor_ms = sliding_cut
+if marker_ms > sliding_cut then floor_ms = marker_ms end
+redis.call('ZREMRANGEBYSCORE', rolling, '-inf', floor_ms - 1)
+
 if delta == 0 then
   return 0
 end
 
-local entries = redis.call('ZRANGE', key, 0, -1)
+local entries = redis.call('ZRANGE', rolling, 0, -1)
 local used = 0
 for _, entry in ipairs(entries) do
   local sep = string.find(entry, ':')
@@ -111,8 +129,8 @@ if delta > 0 then
 end
 
 if applied_delta ~= 0 then
-  redis.call('ZADD', key, now, tostring(now) .. ':' .. tostring(applied_delta))
-  redis.call('EXPIRE', key, ttl_seconds)
+  redis.call('ZADD', rolling, now, tostring(now) .. ':' .. tostring(applied_delta))
+  redis.call('EXPIRE', rolling, ttl_seconds)
 end
 
 return applied_delta
@@ -131,10 +149,16 @@ function clampNonNegative(n: number): number {
   return Math.max(0, n)
 }
 
-async function getRedisEntriesInWindow(rollingKey: string, nowMs: number): Promise<string[]> {
-  const client = redis as unknown as { zrangebyscore?: (key: string, min: number, max: number) => Promise<string[]> }
+async function getRedisEntriesInWindow(
+  rollingKey: string,
+  minScoreInclusive: number,
+  maxScoreInclusive: number
+): Promise<string[]> {
+  const client = redis as unknown as {
+    zrangebyscore?: (key: string, min: number | string, max: number | string) => Promise<string[]>
+  }
   if (typeof client.zrangebyscore === 'function') {
-    return client.zrangebyscore(rollingKey, nowMs - QUOTA_WINDOW_MS, nowMs)
+    return client.zrangebyscore(rollingKey, minScoreInclusive, maxScoreInclusive)
   }
 
   // Backward-compat fallback for long-lived dev processes with stale redis singleton shape.
@@ -142,7 +166,7 @@ async function getRedisEntriesInWindow(rollingKey: string, nowMs: number): Promi
   return all.filter((entry) => {
     const parsed = parseTokenEntry(entry)
     if (!parsed) return false
-    return parsed.ts >= nowMs - QUOTA_WINDOW_MS && parsed.ts <= nowMs
+    return parsed.ts >= minScoreInclusive && parsed.ts <= maxScoreInclusive
   })
 }
 
@@ -156,7 +180,7 @@ async function getQuotaResetMarkerMs(keyId: string): Promise<number | null> {
 export async function resetRollingWindowQuota(keyId: string, nowMs: number = Date.now()): Promise<void> {
   const rollingKey = `token_budget:${keyId}`
   await redis.zremrangebyscore(rollingKey, 0, nowMs)
-  await redis.setex(`${RESET_MARKER_PREFIX}${keyId}`, QUOTA_WINDOW_SECONDS, String(nowMs))
+  await redis.setex(`${RESET_MARKER_PREFIX}${keyId}`, RESET_MARKER_TTL_SECONDS, String(nowMs))
 }
 
 export async function reserveRollingWindowQuota(
@@ -168,6 +192,7 @@ export async function reserveRollingWindowQuota(
   const normalizedRequest = Math.max(0, Math.floor(requestedTokens))
   const numericBudget = Number(budget)
   const rollingKey = `token_budget:${keyId}`
+  const resetKey = `${RESET_MARKER_PREFIX}${keyId}`
   const reservationMember = `${nowMs}:${normalizedRequest}`
   const ttlSeconds = QUOTA_WINDOW_SECONDS
 
@@ -182,8 +207,9 @@ export async function reserveRollingWindowQuota(
     typeof client.eval === 'function'
       ? await client.eval(
           RESERVE_QUOTA_LUA,
-          1,
+          2,
           rollingKey,
+          resetKey,
           nowMs,
           QUOTA_WINDOW_MS,
           numericBudget,
@@ -195,8 +221,11 @@ export async function reserveRollingWindowQuota(
 
   if (!raw) {
     // Fallback for stale dev singleton lacking eval; not strictly atomic.
-    await redis.zremrangebyscore(rollingKey, 0, nowMs - QUOTA_WINDOW_MS)
-    const entries = await getRedisEntriesInWindow(rollingKey, nowMs)
+    const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
+    const slidingCut = nowMs - QUOTA_WINDOW_MS
+    const floorMs = Math.max(slidingCut, resetMarkerMs ?? 0)
+    await redis.zremrangebyscore(rollingKey, '-inf', floorMs - 1)
+    const entries = await getRedisEntriesInWindow(rollingKey, floorMs, nowMs)
     let usedFallback = 0
     for (const entry of entries) {
       const parsed = parseTokenEntry(entry)
@@ -216,11 +245,14 @@ export async function reserveRollingWindowQuota(
     await redis.zadd(rollingKey, nowMs, reservationMember)
     await redis.expire(rollingKey, ttlSeconds)
     const updatedUsed = usedFallback + normalizedRequest
+    const firstAfter = (await redis.zrange(rollingKey, 0, 0))[0]
+    const firstAfterTs = Number(firstAfter?.split(':')[0] ?? nowMs)
+    const resetAt = Number.isFinite(firstAfterTs) ? firstAfterTs + QUOTA_WINDOW_MS : nowMs + QUOTA_WINDOW_MS
     return {
       allowed: true,
       used: clampNonNegative(updatedUsed),
       remaining: clampNonNegative(numericBudget - updatedUsed),
-      resetAt: nowMs + QUOTA_WINDOW_MS,
+      resetAt,
     }
   }
 
@@ -244,6 +276,7 @@ export async function settleRollingWindowQuota(
   if (delta === 0) return
 
   const rollingKey = `token_budget:${keyId}`
+  const resetKey = `${RESET_MARKER_PREFIX}${keyId}`
   const numericBudget = Number(budget)
   const client = redis as unknown as {
     eval?: (
@@ -255,8 +288,9 @@ export async function settleRollingWindowQuota(
   if (HAS_REAL_REDIS && typeof client.eval === 'function') {
     await client.eval(
       SETTLE_QUOTA_LUA,
-      1,
+      2,
       rollingKey,
+      resetKey,
       nowMs,
       QUOTA_WINDOW_MS,
       numericBudget,
@@ -267,8 +301,11 @@ export async function settleRollingWindowQuota(
   }
 
   // Fallback for stale dev process shape (non-atomic).
-  await redis.zremrangebyscore(rollingKey, 0, nowMs - QUOTA_WINDOW_MS)
-  const entries = await getRedisEntriesInWindow(rollingKey, nowMs)
+  const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
+  const slidingCut = nowMs - QUOTA_WINDOW_MS
+  const floorMs = Math.max(slidingCut, resetMarkerMs ?? 0)
+  await redis.zremrangebyscore(rollingKey, '-inf', floorMs - 1)
+  const entries = await getRedisEntriesInWindow(rollingKey, floorMs, nowMs)
   let used = 0
   for (const entry of entries) {
     const parsed = parseTokenEntry(entry)
@@ -292,10 +329,11 @@ export async function getRollingWindowQuotaState(
   nowMs: number = Date.now()
 ): Promise<{ used: number; remaining: number; resetAt: string | null; blocked: boolean }> {
   const rollingKey = `token_budget:${keyId}`
-  await redis.zremrangebyscore(rollingKey, 0, nowMs - QUOTA_WINDOW_MS)
-  const redisEntries = await getRedisEntriesInWindow(rollingKey, nowMs)
   const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
-  const effectiveWindowStart = Math.max(nowMs - QUOTA_WINDOW_MS, resetMarkerMs ?? 0)
+  const slidingCut = nowMs - QUOTA_WINDOW_MS
+  const floorMs = Math.max(slidingCut, resetMarkerMs ?? 0)
+  await redis.zremrangebyscore(rollingKey, '-inf', floorMs - 1)
+  const redisEntries = await getRedisEntriesInWindow(rollingKey, floorMs, nowMs)
 
   let used = 0
   let firstTs: number | null = null
@@ -303,14 +341,13 @@ export async function getRollingWindowQuotaState(
   for (const entry of redisEntries) {
     const parsed = parseTokenEntry(entry)
     if (!parsed) continue
-    if (parsed.ts < effectiveWindowStart) continue
     used += parsed.tokens
     if (firstTs === null || parsed.ts < firstTs) firstTs = parsed.ts
   }
 
   if (redisEntries.length === 0) {
     // Redis can be cleared in dev/restarts; DB remains source of truth fallback.
-    const since = new Date(effectiveWindowStart)
+    const since = new Date(floorMs)
     const [agg, first] = await Promise.all([
       prisma.usageLog.aggregate({
         where: { apiKeyId: keyId, timestamp: { gte: since } },

@@ -61,34 +61,51 @@ function createMockRedis(): RedisInterface {
     },
     zremrangebyscore: async (key: string, min: number | string, max: number | string) => {
       const values = getSortedSet(key)
-      const minScore = Number(min)
-      const maxScore = Number(max)
-      const filtered = values.filter(entry => entry.score < minScore || entry.score > maxScore)
+      const minScore =
+        min === '-inf' || min === '-Infinity' ? Number.NEGATIVE_INFINITY : Number(min)
+      const maxScore =
+        max === '+inf' || max === 'Infinity' || max === '+Infinity'
+          ? Number.POSITIVE_INFINITY
+          : Number(max)
+      const filtered = values.filter(
+        (entry) => !(entry.score >= minScore && entry.score <= maxScore)
+      )
       const removedCount = values.length - filtered.length
       setSortedSet(key, filtered)
       return removedCount
     },
     zrangebyscore: async (key: string, min: number | string, max: number | string) => {
       const values = getSortedSet(key)
-      const minScore = Number(min)
-      const maxScore = Number(max)
+      const minScore =
+        min === '-inf' || min === '-Infinity' ? Number.NEGATIVE_INFINITY : Number(min)
+      const maxScore =
+        max === '+inf' || max === 'Infinity' || max === '+Infinity'
+          ? Number.POSITIVE_INFINITY
+          : Number(max)
       return values
         .filter((entry) => entry.score >= minScore && entry.score <= maxScore)
         .map((entry) => entry.value)
     },
     eval: async (_script: string, numKeys: number, ...args: Array<string | number>) => {
-      // Minimal mock implementation for our rolling-window reservation script shape.
-      // keys: [rollingKey], args: now, windowMs, budget, tokens, member, ttl
-      if (numKeys !== 1 || args.length < 6) return null
+      // Rolling-window reservation script: keys [rollingKey, resetMarkerKey?], argv now, windowMs, budget, tokens, member, ttl
+      if (numKeys < 1 || numKeys > 2 || args.length < numKeys + 5) return null
       const rollingKey = String(args[0] ?? '')
-      const now = Number(args[1] ?? Date.now())
-      const windowMs = Number(args[2] ?? 5 * 60 * 60 * 1000)
-      const budget = Number(args[3] ?? 0)
-      const tokens = Number(args[4] ?? 0)
-      const member = String(args[5] ?? `${now}:0`)
+      const resetKey = numKeys >= 2 ? String(args[1] ?? '') : ''
+      const argv0 = numKeys
+      const now = Number(args[argv0] ?? Date.now())
+      const windowMs = Number(args[argv0 + 1] ?? 5 * 60 * 60 * 1000)
+      const budget = Number(args[argv0 + 2] ?? 0)
+      const tokens = Number(args[argv0 + 3] ?? 0)
+      const member = String(args[argv0 + 4] ?? `${now}:0`)
       const windowStart = now - windowMs
 
-      await redisInstance.zremrangebyscore(rollingKey, 0, windowStart)
+      let markerMs = 0
+      if (numKeys >= 2 && resetKey) {
+        const raw = await redisInstance.get(resetKey)
+        if (raw) markerMs = Number(raw) || 0
+      }
+      const floorMs = Math.max(windowStart, markerMs)
+      await redisInstance.zremrangebyscore(rollingKey, '-inf', floorMs - 1)
       const entries = await redisInstance.zrange(rollingKey, 0, -1)
       let used = 0
       for (const entry of entries) {
