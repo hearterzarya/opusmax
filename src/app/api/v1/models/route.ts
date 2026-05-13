@@ -5,6 +5,57 @@ import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
 import { upstreamModelsListUrl } from '@/lib/upstream-anthropic'
 import { getAnthropicModelsListFallback } from '@/lib/anthropic-models-fallback'
 
+function mergeAnthropicModelsPayload(upstreamBody: unknown): unknown {
+  const merge =
+    process.env.GATEWAY_MERGE_MODEL_FALLBACK !== '0' &&
+    process.env.GATEWAY_MERGE_MODEL_FALLBACK !== 'false'
+
+  if (!merge) return upstreamBody
+
+  const fb = getAnthropicModelsListFallback()
+  const fbRows = fb.data as Array<Record<string, unknown>>
+
+  if (!upstreamBody || typeof upstreamBody !== 'object') {
+    return fb
+  }
+
+  const obj = upstreamBody as {
+    data?: unknown[]
+    first_id?: string
+    last_id?: string
+    has_more?: boolean
+  }
+
+  const upstreamData = Array.isArray(obj.data) ? obj.data : []
+
+  const idOf = (row: unknown): string | null => {
+    if (row && typeof row === 'object' && 'id' in row) {
+      const id = (row as { id: unknown }).id
+      return typeof id === 'string' ? id : null
+    }
+    return null
+  }
+
+  const seen = new Set<string>()
+  for (const row of upstreamData) {
+    const id = idOf(row)
+    if (id) seen.add(id)
+  }
+
+  const merged = [...upstreamData]
+  for (const row of fbRows) {
+    const id = typeof row.id === 'string' ? row.id : null
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    merged.push(row)
+  }
+
+  return {
+    ...obj,
+    data: merged,
+  }
+}
+
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
@@ -96,7 +147,8 @@ export async function GET(request: NextRequest) {
     }
 
     bumpLastUsed()
-    return NextResponse.json(data, { headers: corsHeaders })
+    const merged = mergeAnthropicModelsPayload(data)
+    return NextResponse.json(merged, { headers: corsHeaders })
   } catch (error) {
     console.error('Models endpoint error:', error)
     return createErrorResponse(ErrorCodes.UPSTREAM_ERROR, 'An error occurred', 500)
