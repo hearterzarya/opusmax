@@ -1,251 +1,297 @@
 'use client'
 
-import { useState } from 'react'
-import { BookOpen, Code2, Copy, Key, Shield, Terminal, Zap } from 'lucide-react'
 import { SiteHeader } from '@/components/site/site-header'
 import { SiteFooter } from '@/components/site/site-footer'
-
-const quickstartCode = `import Anthropic from '@anthropic-ai/sdk';
-
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  baseURL: 'https://api.opusmax.pro/v1',
-});
-
-const message = await client.messages.create({
-  model: 'claude-opus-4-7',
-  max_tokens: 1024,
-  messages: [{ role: 'user', content: 'Hello, Claude!' }],
-});
-
-console.log(message);`
-
-const setupCommands = [
-  {
-    title: 'Claude Code',
-    description: 'Edit your ~/.claude/settings.json',
-    command: `"anthropic": {
-  "apiKey": "your-opusmax-key",
-  "baseURL": "https://api.opusmax.pro/v1"
-}`,
-  },
-  {
-    title: 'Cursor',
-    description: 'Add to Cursor AI settings (Cmd+,)',
-    command: `"ANTHROPIC_API_KEY": "your-opusmax-key",
-"ANTHROPIC_BASE_URL": "https://api.opusmax.pro/v1"`,
-  },
-  {
-    title: 'VS Code',
-    description: 'Add to Claude extension settings',
-    command: `{
-  "apiKey": "your-opusmax-key",
-  "baseURL": "https://api.opusmax.pro/v1"
-}`,
-  },
-  {
-    title: 'Windsurf / Cline / Roo',
-    description: 'Use environment variables in your editor',
-    command: `ANTHROPIC_API_KEY=your-opusmax-key
-ANTHROPIC_BASE_URL=https://api.opusmax.pro/v1`,
-  },
-]
-
-const endpoints = [
-  { method: 'POST', path: '/v1/messages', description: 'Create a message with Claude', body: '{ model, messages, max_tokens, stream? }' },
-  { method: 'GET', path: '/v1/models', description: 'List available models', body: '' },
-  { method: 'POST', path: '/v1/messages/count_tokens', description: 'Count tokens in a message', body: '{ model, messages, system? }' },
-  { method: 'GET', path: '/api/key-status', description: 'Check API key usage', body: '?key=your-api-key' },
-]
-
-function CodeBlock({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false)
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1200)
-    } catch {
-      // ignore
-    }
-  }
-  return (
-    <div className="grad-border relative overflow-hidden rounded-xl">
-      <div className="bg-[#0a0817]/80 backdrop-blur">
-        <div className="flex items-center justify-between border-b border-white/5 px-4 py-2">
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-rose-400/80" />
-            <span className="h-2 w-2 rounded-full bg-amber-400/80" />
-            <span className="h-2 w-2 rounded-full bg-emerald-400/80" />
-          </div>
-          <button
-            onClick={onCopy}
-            className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-white/70 transition-colors hover:bg-white/[0.08] hover:text-white"
-          >
-            <Copy className="h-3 w-3" /> {copied ? 'Copied' : 'Copy'}
-          </button>
-        </div>
-        <pre className="overflow-x-auto p-4 text-sm leading-relaxed text-white/85">
-          <code className="font-mono">{code}</code>
-        </pre>
-      </div>
-    </div>
-  )
-}
-
-function SectionHeader({
-  icon: Icon,
-  eyebrow,
-  title,
-  description,
-}: {
-  icon: React.ElementType
-  eyebrow: string
-  title: string
-  description?: string
-}) {
-  return (
-    <div className="mb-5">
-      <p className="font-mono text-xs uppercase tracking-[0.22em] text-white/50">{eyebrow}</p>
-      <h2 className="font-display tracking-display mt-2 flex items-center gap-2 text-3xl font-semibold text-white">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500/30 to-fuchsia-500/20 ring-1 ring-white/10">
-          <Icon className="h-4 w-4 text-white/85" />
-        </span>
-        {title}
-      </h2>
-      {description && <p className="mt-2 text-white/65">{description}</p>}
-    </div>
-  )
-}
+import { DocsApiCodePair, DocsApiSection } from '@/components/docs/docs-api-section'
+import { ConfigRow, ModelCard, ToolCard } from '@/components/docs/docs-cards'
+import { DocsCodeBlock } from '@/components/docs/docs-code-block'
+import { DocsMobileNav } from '@/components/docs/docs-mobile-nav'
+import { DocsSection, DocsSubheading, DocsProse } from '@/components/docs/docs-section'
+import { DocsSidebar } from '@/components/docs/docs-sidebar'
+import { DocsToc } from '@/components/docs/docs-toc'
+import { DocsTroubleshooting } from '@/components/docs/docs-troubleshooting'
+import {
+  API_BASE_URL,
+  API_ENDPOINTS,
+  API_KEY_PLACEHOLDER,
+  API_PATHS,
+  API_V1_URL,
+  AUTH_HEADERS_CODE,
+  AVAILABLE_MODELS,
+  CLAUDE_CODE_SETTINGS_JSON,
+  CLINE_SETTINGS_JSON,
+  COUNT_TOKENS_REQUEST_CODE,
+  FEATURE_BADGES,
+  IMAGE_ANALYSIS_REQUEST_CODE,
+  KEY_STATUS_RESPONSE_CODE,
+  MESSAGES_REQUEST_CODE,
+  MESSAGES_RESPONSE_CODE,
+  MODELS_RESPONSE_CODE,
+  ROO_SETTINGS_JSON,
+  WEB_SEARCH_REQUEST_CODE,
+} from '@/lib/docs-config'
+import { CheckCircle2 } from 'lucide-react'
 
 export default function DocsPage() {
   return (
-    <div className="relative min-h-screen overflow-x-clip">
+    <div className="relative min-h-screen bg-[#030408] text-foreground">
+      <div
+        className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(34,211,238,0.12),transparent),radial-gradient(ellipse_60%_40%_at_100%_0%,rgba(139,92,246,0.1),transparent)]"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none fixed inset-0 opacity-[0.35] [background-image:linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] [background-size:64px_64px]"
+        aria-hidden
+      />
+
       <SiteHeader active="docs" />
 
-      <main className="aurora relative">
-        <span className="aurora-blob" aria-hidden />
-        <div className="relative z-10 mx-auto max-w-4xl px-6 py-14">
-          <div>
-            <p className="font-mono text-xs uppercase tracking-[0.22em] text-white/50">Documentation</p>
-            <h1 className="font-display tracking-display mt-3 text-5xl font-semibold text-white md:text-6xl">
-              Build with the <span className="gradient-text">OpusMax</span> API
-            </h1>
-            <p className="mt-4 max-w-2xl text-white/70">
-              Fully Anthropic-compatible. Point your client at our base URL, use your key,
-              and continue using the official SDKs you already know.
-            </p>
+      <main className="relative z-10">
+        <div className="mx-auto max-w-[1400px] px-4 py-10 sm:px-6 lg:py-14">
+          <div className="flex gap-8 xl:gap-10">
+            <DocsSidebar />
+
+            <article className="min-w-0 flex-1 max-w-3xl xl:max-w-none">
+              <header id="overview" className="scroll-mt-28">
+                <p className="font-mono text-xs uppercase tracking-[0.22em] text-cyan-200/60">Documentation</p>
+                <h1 className="font-display mt-3 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+                  Setup Guide
+                </h1>
+                <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-white/60">
+                  Get up and running with OpusMax in minutes. Configure your API key, connect your favorite IDE, and
+                  start using Claude-compatible models through a single gateway.
+                </p>
+                <div className="mt-6 flex flex-wrap gap-2">
+                  {FEATURE_BADGES.map((badge) => (
+                    <span
+                      key={badge}
+                      className="rounded-full border border-cyan-500/20 bg-cyan-500/5 px-3 py-1 text-xs font-medium text-cyan-100/90"
+                    >
+                      {badge}
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-6 grid gap-3 rounded-2xl border border-cyan-500/15 bg-cyan-500/[0.04] p-4 sm:grid-cols-2">
+                  <div>
+                    <p className="font-mono text-[10px] uppercase tracking-wider text-white/45">Base URL</p>
+                    <p className="mt-1 font-mono text-sm text-cyan-100">{API_BASE_URL}</p>
+                  </div>
+                  <div>
+                    <p className="font-mono text-[10px] uppercase tracking-wider text-white/45">API v1</p>
+                    <p className="mt-1 font-mono text-sm text-cyan-100">{API_V1_URL}</p>
+                  </div>
+                </div>
+                <DocsProse className="mt-6">
+                  OpusMax is a Claude-compatible AI API gateway designed for developers, teams, and AI-powered coding
+                  workflows. It works with Claude Code, VS Code, Cursor, Windsurf, Cline, Roo Code, and other tools that
+                  support Anthropic-compatible or OpenAI-compatible API routing.
+                </DocsProse>
+              </header>
+
+              <div className="mt-8">
+                <DocsMobileNav />
+              </div>
+
+              <DocsSection id="prerequisites" title="Prerequisites" className="first:border-t-0">
+                <ul className="space-y-3">
+                  {[
+                    'Node.js 18 or newer',
+                    'Active OpusMax API key',
+                    'Supported IDE or coding agent',
+                    'Internet connection for API access',
+                  ].map((item) => (
+                    <li key={item} className="flex gap-2.5 text-sm text-white/65">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-400" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </DocsSection>
+
+              <DocsSection
+                id="claude-code"
+                title="Claude Code CLI"
+                description="Configure Claude Code CLI to route requests through OpusMax."
+              >
+                <DocsProse>
+                  Create or edit <code className="text-cyan-200/90">~/.claude/settings.json</code>:
+                </DocsProse>
+                <DocsCodeBlock code={CLAUDE_CODE_SETTINGS_JSON} label="~/.claude/settings.json" />
+              </DocsSection>
+
+              <DocsSection
+                id="vscode"
+                title="VS Code"
+                description="VS Code integrations can use the same Claude-compatible configuration used by Claude Code CLI. After changing configuration files, restart VS Code so the new environment values are loaded."
+              >
+                <DocsProse>
+                  Use the same <code className="text-cyan-200/90">~/.claude/settings.json</code> configuration as Claude
+                  Code CLI, then restart VS Code.
+                </DocsProse>
+              </DocsSection>
+
+              <DocsSection
+                id="cursor"
+                title="Cursor"
+                description="Configure Cursor to route AI requests through the OpusMax API gateway."
+              >
+                <DocsSubheading>API Routing</DocsSubheading>
+                <div className="space-y-2">
+                  <ConfigRow label="Base URL" value={API_V1_URL} />
+                  <ConfigRow label="API Key" value={API_KEY_PLACEHOLDER} />
+                  <ConfigRow label="Model" value="claude-sonnet-4-6" />
+                </div>
+              </DocsSection>
+
+              <DocsSection
+                id="windsurf"
+                title="Windsurf"
+                description="Configure Windsurf to use OpusMax as the API provider."
+              >
+                <DocsSubheading>API Routing</DocsSubheading>
+                <DocsCodeBlock code={API_V1_URL} label="Base URL" />
+              </DocsSection>
+
+              <DocsSection
+                id="cline"
+                title="Cline"
+                description="Configure the Cline VS Code extension to connect with OpusMax."
+              >
+                <DocsSubheading>Configuration</DocsSubheading>
+                <DocsCodeBlock code={CLINE_SETTINGS_JSON} label="settings.json" />
+              </DocsSection>
+
+              <DocsSection
+                id="roo"
+                title="Roo Code"
+                description="Configure Roo Code to use the OpusMax Claude-compatible gateway."
+              >
+                <DocsSubheading>Configuration</DocsSubheading>
+                <DocsCodeBlock code={ROO_SETTINGS_JSON} label="settings.json" />
+              </DocsSection>
+
+              <div className="mt-16 border-t border-cyan-500/10 pt-6">
+                <p className="font-mono text-xs uppercase tracking-[0.22em] text-cyan-200/50">API Reference</p>
+              </div>
+
+              <DocsSection
+                id="authentication"
+                title="Authentication"
+                description="API requests can authenticate using either an x-api-key header or a Bearer token."
+                className="!border-t-0"
+              >
+                <DocsCodeBlock code={AUTH_HEADERS_CODE} label="Header Options" />
+                <DocsProse>
+                  Dashboard endpoints may use JWT-based authentication depending on the implementation.
+                </DocsProse>
+              </DocsSection>
+
+              <DocsApiSection
+                id="messages"
+                method="POST"
+                pathBadge={API_PATHS.messages}
+                fullUrl={API_ENDPOINTS.messages}
+                title="Messages"
+                description="Create a message using an Anthropic-compatible request format. Streaming can be enabled with stream: true."
+              >
+                <DocsApiCodePair
+                  request={MESSAGES_REQUEST_CODE}
+                  response={MESSAGES_RESPONSE_CODE}
+                  note="When stream is true, the API returns Server-Sent Events."
+                />
+              </DocsApiSection>
+
+              <DocsApiSection
+                id="models"
+                method="GET"
+                pathBadge={API_PATHS.models}
+                fullUrl={API_ENDPOINTS.models}
+                title="Models"
+                description="Returns available model IDs and display names."
+              >
+                <DocsCodeBlock label="Response" code={MODELS_RESPONSE_CODE} />
+              </DocsApiSection>
+
+              <DocsApiSection
+                id="token-counting"
+                method="POST"
+                pathBadge={API_PATHS.countTokens}
+                fullUrl={API_ENDPOINTS.countTokens}
+                title="Token Counting"
+                description="Count tokens for a message before sending it."
+              >
+                <DocsCodeBlock label="Request" code={COUNT_TOKENS_REQUEST_CODE} />
+              </DocsApiSection>
+
+              <DocsApiSection
+                id="key-status"
+                method="GET"
+                pathBadge={API_PATHS.keyStatus}
+                fullUrl={API_ENDPOINTS.keyStatus}
+                title="Key Status"
+                description="Check API key status, usage, limits, active window, and request statistics."
+              >
+                <DocsCodeBlock label="Response" code={KEY_STATUS_RESPONSE_CODE} />
+              </DocsApiSection>
+
+              <DocsApiSection
+                id="web-search"
+                method="POST"
+                pathBadge={API_PATHS.webSearch}
+                fullUrl={API_ENDPOINTS.webSearch}
+                title="Web Search"
+                description="Search the web for fresh information. Short keyword-style queries usually work best."
+              >
+                <DocsCodeBlock label="Request" code={WEB_SEARCH_REQUEST_CODE} />
+              </DocsApiSection>
+
+              <DocsApiSection
+                id="image-analysis"
+                method="POST"
+                pathBadge={API_PATHS.understandImage}
+                fullUrl={API_ENDPOINTS.understandImage}
+                title="Image Analysis"
+                description="Analyze images using a prompt and an image URL. Supports common image formats such as JPEG, PNG, and WebP."
+              >
+                <DocsCodeBlock label="Request" code={IMAGE_ANALYSIS_REQUEST_CODE} />
+              </DocsApiSection>
+
+              <DocsSection
+                id="builtin-tools"
+                title="Built-in Tools"
+                description="OpusMax includes server-side tools that work without additional MCP setup on the client side."
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <ToolCard
+                    title="Web Search"
+                    description="Real-time web search for current information, available through supported connected clients."
+                  />
+                  <ToolCard
+                    title="Image Analysis"
+                    description="AI image understanding for JPEG, PNG, and WebP inputs with no extra local setup."
+                  />
+                </div>
+              </DocsSection>
+
+              <DocsSection id="available-models" title="Available Models">
+                <div className="grid gap-4 lg:grid-cols-3">
+                  {AVAILABLE_MODELS.map((model) => (
+                    <ModelCard key={model.id} {...model} />
+                  ))}
+                </div>
+                <DocsProse>
+                  Common aliases such as opus, sonnet, and haiku may map to the configured backend model depending on
+                  gateway settings.
+                </DocsProse>
+              </DocsSection>
+
+              <DocsSection id="troubleshooting" title="Troubleshooting">
+                <DocsTroubleshooting />
+              </DocsSection>
+            </article>
+
+            <DocsToc />
           </div>
-
-          <section className="mt-12">
-            <SectionHeader
-              icon={Zap}
-              eyebrow="Quick Start"
-              title="Install and send your first request"
-              description="Use the Anthropic SDK and configure your OpusMax key."
-            />
-            <div className="glass rounded-2xl p-5">
-              <div className="mb-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 font-mono text-sm text-white/85">
-                <span className="text-white/40">$</span> npm install @anthropic-ai/sdk
-              </div>
-              <CodeBlock code={quickstartCode} />
-            </div>
-          </section>
-
-          <section className="mt-12">
-            <SectionHeader icon={Terminal} eyebrow="API" title="Endpoints" />
-            <div className="space-y-3">
-              {endpoints.map((ep) => (
-                <div
-                  key={ep.path}
-                  className="glass glass-hover lift flex flex-col gap-2 rounded-2xl p-4 md:flex-row md:items-start"
-                >
-                  <span
-                    className={`inline-flex w-fit items-center rounded-md px-2.5 py-0.5 font-mono text-[11px] font-semibold ${
-                      ep.method === 'GET'
-                        ? 'border border-white/10 bg-white/[0.04] text-white/85'
-                        : 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-[0_0_20px_rgba(168,85,247,0.4)]'
-                    }`}
-                  >
-                    {ep.method}
-                  </span>
-                  <div className="flex-1">
-                    <code className="font-mono text-sm text-white">{ep.path}</code>
-                    <p className="mt-1 text-sm text-white/65">{ep.description}</p>
-                    {ep.body && <p className="mt-2 font-mono text-xs text-white/45">{ep.body}</p>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="mt-12">
-            <SectionHeader icon={Code2} eyebrow="Setup" title="Editor configuration" />
-            <div className="grid gap-4 md:grid-cols-2">
-              {setupCommands.map((s) => (
-                <div key={s.title} className="glass rounded-2xl p-5">
-                  <h3 className="font-display text-base font-semibold text-white">{s.title}</h3>
-                  <p className="mt-1 text-sm text-white/65">{s.description}</p>
-                  <div className="mt-4">
-                    <CodeBlock code={s.command} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="mt-12">
-            <SectionHeader icon={Key} eyebrow="Auth" title="Authentication" />
-            <div className="glass space-y-4 rounded-2xl p-5">
-              <div>
-                <h3 className="font-medium text-white">x-api-key header</h3>
-                <p className="mt-1 text-sm text-white/65">Include your API key in the request header:</p>
-                <div className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 font-mono text-sm text-white/85">
-                  x-api-key: sk-ant-opm-your-key-here
-                </div>
-              </div>
-              <div>
-                <h3 className="font-medium text-white">Bearer token</h3>
-                <p className="mt-1 text-sm text-white/65">Or use the Authorization header:</p>
-                <div className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 font-mono text-sm text-white/85">
-                  Authorization: Bearer sk-ant-opm-your-key-here
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="mt-12">
-            <SectionHeader icon={Shield} eyebrow="Limits" title="Rate limits & budgets" />
-            <ul className="glass grid gap-2 rounded-2xl p-5 text-sm text-white/80 md:grid-cols-2">
-              <li className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                Per-key RPM limits based on your plan
-              </li>
-              <li className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                5-hour rolling token window for budget control
-              </li>
-              <li className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                Monthly token budget enforcement
-              </li>
-              <li className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                Streaming pass-through with zero added latency
-              </li>
-            </ul>
-          </section>
-
-          <section className="mt-12">
-            <SectionHeader icon={BookOpen} eyebrow="Examples" title="cURL example" />
-            <CodeBlock
-              code={`curl https://api.opusmax.pro/v1/messages \\
-  -H "x-api-key: sk-ant-opm-your-key-here" \\
-  -H "anthropic-version: 2023-06-01" \\
-  -H "content-type: application/json" \\
-  -d '{
-    "model": "claude-opus-4-7",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "max_tokens": 1024
-  }'`}
-            />
-          </section>
         </div>
       </main>
 

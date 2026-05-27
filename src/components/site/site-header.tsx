@@ -5,15 +5,15 @@ interface SiteHeaderProps {
 }
 
 const links: { key: NonNullable<SiteHeaderProps['active']>; label: string; href: string }[] = [
-  { key: 'docs', label: 'Docs', href: '/docs' },
+  { key: 'docs', label: 'Documentation', href: '/docs' },
   { key: 'status', label: 'Status', href: '/status' },
-  { key: 'usage', label: 'Usage', href: '/key-status' },
+  { key: 'usage', label: 'Check Usage', href: '/key-status' },
 ]
 
 export function SiteHeader({ active }: SiteHeaderProps) {
   return (
     <header className="sticky top-0 z-40 border-b border-white/5 bg-background/60 backdrop-blur-xl">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-6 px-6">
+      <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between gap-6 px-4 sm:px-6">
         <Link href="/" className="group flex items-center gap-2.5">
           <span className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl">
             <span

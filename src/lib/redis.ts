@@ -171,6 +171,7 @@ function createMockRedis(): RedisInterface {
 
 const globalForRedis = globalThis as unknown as {
   redis: RedisInterface | undefined
+  redisMockWarned?: boolean
 }
 
 function createRedisClient(): RedisInterface {
@@ -178,7 +179,10 @@ function createRedisClient(): RedisInterface {
   const isPlaceholderUrl = !redisUrl || redisUrl.includes('xxx.upstash.io')
 
   if (isPlaceholderUrl) {
-    console.warn('REDIS_URL is missing or placeholder, using mock Redis for development')
+    if (!globalForRedis.redisMockWarned) {
+      globalForRedis.redisMockWarned = true
+      console.warn('REDIS_URL is missing or placeholder, using mock Redis for development')
+    }
     return createMockRedis()
   }
 
