@@ -18,6 +18,11 @@ import {
   API_V1_URL,
   AUTH_HEADERS_CODE,
   AVAILABLE_MODELS,
+  CLI_COMMANDS,
+  CLI_PACKAGE,
+  CLI_QUICK_START_CODE,
+  CLI_SETUP_STEPS,
+  CLI_SUPPORTED_IDES,
   CLAUDE_CODE_SETTINGS_JSON,
   CLINE_SETTINGS_JSON,
   COUNT_TOKENS_REQUEST_CODE,
@@ -58,9 +63,18 @@ export default function DocsPage() {
                   Setup Guide
                 </h1>
                 <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-white/60">
-                  Get up and running with OpusMax in minutes. Configure your API key, connect your favorite IDE, and
-                  start using Claude-compatible models through a single gateway.
+                  Get up and running with OpusMax in minutes. Run{' '}
+                  <code className="text-cyan-200/90">{CLI_COMMANDS.setup}</code> to paste your API key and configure
+                  your favorite IDE — or follow the manual steps below.
                 </p>
+                <div className="mt-5 rounded-2xl border border-violet-500/25 bg-violet-500/[0.06] p-4">
+                  <p className="font-mono text-[10px] uppercase tracking-wider text-violet-200/70">Recommended</p>
+                  <p className="mt-2 font-mono text-sm text-white sm:text-base">{CLI_COMMANDS.setup}</p>
+                  <p className="mt-2 text-xs text-white/50">
+                    Requires Node.js 18+. No global install needed — uses the{' '}
+                    <span className="font-mono text-white/70">{CLI_PACKAGE}</span> npm package.
+                  </p>
+                </div>
                 <div className="mt-6 flex flex-wrap gap-2">
                   {FEATURE_BADGES.map((badge) => (
                     <span
@@ -92,7 +106,72 @@ export default function DocsPage() {
                 <DocsMobileNav />
               </div>
 
-              <DocsSection id="prerequisites" title="Prerequisites" className="first:border-t-0">
+              <DocsSection
+                id="cli-setup"
+                title="CLI Setup"
+                description="The fastest way to connect OpusMax — paste your API key once, then pick the tools you use."
+                className="first:border-t-0"
+              >
+                <DocsCodeBlock code={CLI_QUICK_START_CODE} label="Terminal" />
+                <DocsSubheading>What happens during setup</DocsSubheading>
+                <ol className="space-y-4">
+                  {CLI_SETUP_STEPS.map((step, i) => (
+                    <li key={step.title} className="flex gap-3 text-sm text-white/65">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-cyan-500/30 bg-cyan-500/10 font-mono text-xs text-cyan-200">
+                        {i + 1}
+                      </span>
+                      <div>
+                        <p className="font-medium text-white/85">{step.title}</p>
+                        <p className="mt-0.5 leading-relaxed">{step.body}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                <DocsSubheading>Supported tools</DocsSubheading>
+                <div className="flex flex-wrap gap-2">
+                  {CLI_SUPPORTED_IDES.map((name) => (
+                    <span
+                      key={name}
+                      className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-xs text-white/70"
+                    >
+                      {name}
+                    </span>
+                  ))}
+                </div>
+                <DocsSubheading>All CLI commands</DocsSubheading>
+                <div className="space-y-2 font-mono text-sm text-white/70">
+                  <p>
+                    <span className="text-cyan-200/80">{CLI_COMMANDS.setup}</span>
+                    <span className="ml-2 font-sans text-xs text-white/45">— interactive setup</span>
+                  </p>
+                  <p>
+                    <span className="text-cyan-200/80">{CLI_COMMANDS.status}</span>
+                    <span className="ml-2 font-sans text-xs text-white/45">— show config & verify key</span>
+                  </p>
+                  <p>
+                    <span className="text-cyan-200/80">{CLI_COMMANDS.test}</span>
+                    <span className="ml-2 font-sans text-xs text-white/45">— send a test message</span>
+                  </p>
+                  <p>
+                    <span className="text-cyan-200/80">{CLI_COMMANDS.models}</span>
+                    <span className="ml-2 font-sans text-xs text-white/45">— list gateway models</span>
+                  </p>
+                  <p>
+                    <span className="text-cyan-200/80">{CLI_COMMANDS.doctor}</span>
+                    <span className="ml-2 font-sans text-xs text-white/45">— run diagnostics</span>
+                  </p>
+                </div>
+                <DocsProse>
+                  Gateway base URL is preset to <code className="text-cyan-200/90">{API_BASE_URL}</code>. Check usage
+                  anytime at{' '}
+                  <a href={API_ENDPOINTS.keyStatus} className="text-cyan-300/90 underline-offset-2 hover:underline">
+                    key-status
+                  </a>
+                  . Manual IDE steps are documented in the sections below if you prefer not to use the CLI.
+                </DocsProse>
+              </DocsSection>
+
+              <DocsSection id="prerequisites" title="Prerequisites">
                 <ul className="space-y-3">
                   {[
                     'Node.js 18 or newer',
@@ -114,7 +193,9 @@ export default function DocsPage() {
                 description="Configure Claude Code CLI to route requests through OpusMax."
               >
                 <DocsProse>
-                  Create or edit <code className="text-cyan-200/90">~/.claude/settings.json</code>:
+                  Prefer automatic setup: <code className="text-cyan-200/90">{CLI_COMMANDS.setup}</code> and select{' '}
+                  <strong className="font-medium text-white/80">Claude Code</strong>. Or create or edit{' '}
+                  <code className="text-cyan-200/90">~/.claude/settings.json</code> manually:
                 </DocsProse>
                 <DocsCodeBlock code={CLAUDE_CODE_SETTINGS_JSON} label="~/.claude/settings.json" />
               </DocsSection>
@@ -133,7 +214,7 @@ export default function DocsPage() {
               <DocsSection
                 id="cursor"
                 title="Cursor"
-                description="Configure Cursor to route AI requests through the OpusMax API gateway."
+                description={`Configure Cursor to route AI requests through OpusMax. Run ${CLI_COMMANDS.setup} and select Cursor for copy-paste values, or use the settings below.`}
               >
                 <DocsSubheading>API Routing</DocsSubheading>
                 <div className="space-y-2">
@@ -146,7 +227,7 @@ export default function DocsPage() {
               <DocsSection
                 id="windsurf"
                 title="Windsurf"
-                description="Configure Windsurf to use OpusMax as the API provider."
+                description={`Configure Windsurf to use OpusMax as the API provider. ${CLI_COMMANDS.setup} prints the base URL when you select Windsurf.`}
               >
                 <DocsSubheading>API Routing</DocsSubheading>
                 <DocsCodeBlock code={API_V1_URL} label="Base URL" />

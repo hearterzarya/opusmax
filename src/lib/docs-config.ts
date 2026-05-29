@@ -4,6 +4,51 @@ export const DOCS_URL = 'https://opusxmax.vercel.app/docs'
 
 export const API_KEY_PLACEHOLDER = 'YOUR_API_KEY'
 
+export const CLI_PACKAGE = 'opusmaxx'
+
+export const CLI_COMMANDS = {
+  setup: `npx ${CLI_PACKAGE} setup`,
+  status: `npx ${CLI_PACKAGE} status --verify`,
+  test: `npx ${CLI_PACKAGE} test`,
+  models: `npx ${CLI_PACKAGE} models`,
+  doctor: `npx ${CLI_PACKAGE} doctor`,
+} as const
+
+export const CLI_QUICK_START_CODE = `# 1. Run interactive setup (paste your API key when prompted)
+${CLI_COMMANDS.setup}
+
+# 2. Verify config and key
+${CLI_COMMANDS.status}
+
+# 3. Optional: send a test message
+${CLI_COMMANDS.test}`
+
+export const CLI_SUPPORTED_IDES = [
+  'Claude Code',
+  'Claude Desktop',
+  'VS Code',
+  'Cursor',
+  'Windsurf',
+  'Cline',
+  'Roo Code',
+  'Terminal (.env)',
+] as const
+
+export const CLI_SETUP_STEPS = [
+  {
+    title: 'Paste your API key',
+    body: `Enter your OpusMax key (sk-ant-ox-…). The CLI verifies it against ${API_BASE_URL}/key-status.`,
+  },
+  {
+    title: 'Choose your tools',
+    body: 'Select one or more IDEs/agents — VS Code, Cursor, Claude Code, Windsurf, Cline, Roo Code, and more.',
+  },
+  {
+    title: 'Apply & test',
+    body: 'Configuration is written automatically where possible. Optionally run a quick test message when setup finishes.',
+  },
+] as const
+
 export const API_ENDPOINTS = {
   messages: `${API_V1_URL}/messages`,
   models: `${API_V1_URL}/models`,
@@ -30,6 +75,7 @@ export const DOC_NAV: DocNavGroup[] = [
     title: 'Getting Started',
     items: [
       { id: 'overview', label: 'Overview' },
+      { id: 'cli-setup', label: 'CLI Setup' },
       { id: 'prerequisites', label: 'Prerequisites' },
     ],
   },
@@ -223,6 +269,10 @@ export const AVAILABLE_MODELS = [
 ] as const
 
 export const TROUBLESHOOTING_ITEMS = [
+  {
+    title: 'CLI verification failed',
+    body: `Run ${CLI_COMMANDS.status} to confirm your key. Check usage at ${API_ENDPOINTS.keyStatus}. Ensure Node.js 18+ is installed.`,
+  },
   {
     title: 'Connection errors',
     body: 'Check whether your API key is active, correctly copied, and not expired.',

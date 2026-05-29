@@ -188,6 +188,21 @@ export default function NewApiKeyPage() {
             </div>
           </div>
         </div>
+
+        <div className="glass mt-6 rounded-2xl border border-cyan-500/20 p-5">
+          <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-200/70">CLI Setup</p>
+          <p className="mt-2 text-sm text-white/65">
+            Configure Claude Code or other tools with the official CLI:
+          </p>
+          <pre className="mt-3 overflow-x-auto rounded-xl border border-white/10 bg-black/40 p-3 font-mono text-xs text-cyan-100">
+            npx opusmaxx setup
+          </pre>
+          <p className="mt-4 text-xs text-white/50">Or set manually:</p>
+          <pre className="mt-2 overflow-x-auto rounded-xl border border-white/10 bg-black/40 p-3 font-mono text-xs text-white/80">
+{`ANTHROPIC_BASE_URL=https://opusxmax.vercel.app/api
+ANTHROPIC_API_KEY=${newKey}`}
+          </pre>
+        </div>
       </div>
     )
   }

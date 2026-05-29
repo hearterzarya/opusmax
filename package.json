@@ -15,7 +15,11 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
-    "db:clear-key-expiry": "prisma db execute --file prisma/sql/clear-key-expiry.sql --schema prisma/schema.prisma"
+    "db:clear-key-expiry": "prisma db execute --file prisma/sql/clear-key-expiry.sql --schema prisma/schema.prisma",
+    "cli:dev": "pnpm --filter opusmaxx dev",
+    "cli:build": "pnpm --filter opusmaxx build",
+    "cli:link": "pnpm --filter opusmaxx link --global",
+    "cli:publish": "pnpm --filter opusmaxx publish --access public"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
