@@ -1,6 +1,11 @@
-export const API_BASE_URL = 'https://opusxmax.vercel.app/api'
-export const API_V1_URL = 'https://opusxmax.vercel.app/api/v1'
-export const DOCS_URL = 'https://opusxmax.vercel.app/docs'
+import {
+  API_BASE_URL,
+  API_V1_URL,
+  DOCS_URL,
+  RAILWAY_API_BASE_URL,
+} from './deploy-config'
+
+export { API_BASE_URL, API_V1_URL, DOCS_URL, RAILWAY_API_BASE_URL }
 
 export const API_KEY_PLACEHOLDER = 'YOUR_API_KEY'
 

@@ -1,0 +1,15 @@
+.git
+.next
+node_modules
+.env
+.env.*
+!.env.example
+coverage
+.vercel
+*.log
+.cursor
+terminals
+packages/cli/dist
+README.md
+CLAUDE.md
+docs

@@ -23,6 +23,7 @@ import {
   CLI_QUICK_START_CODE,
   CLI_SETUP_STEPS,
   CLI_SUPPORTED_IDES,
+  RAILWAY_API_BASE_URL,
   CLAUDE_CODE_SETTINGS_JSON,
   CLINE_SETTINGS_JSON,
   COUNT_TOKENS_REQUEST_CODE,
@@ -95,6 +96,18 @@ export default function DocsPage() {
                     <p className="mt-1 font-mono text-sm text-cyan-100">{API_V1_URL}</p>
                   </div>
                 </div>
+                {RAILWAY_API_BASE_URL ? (
+                  <div className="mt-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.06] p-4">
+                    <p className="font-mono text-[10px] uppercase tracking-wider text-emerald-200/80">
+                      Fast API (Railway)
+                    </p>
+                    <p className="mt-2 font-mono text-sm text-emerald-100">{RAILWAY_API_BASE_URL}</p>
+                    <p className="mt-2 text-xs text-white/50">
+                      Use this base URL in Claude Code / LobeHub for lower latency. Web, admin, and docs stay on
+                      Vercel.
+                    </p>
+                  </div>
+                ) : null}
                 <DocsProse className="mt-6">
                   OpusMax is a Claude-compatible AI API gateway designed for developers, teams, and AI-powered coding
                   workflows. It works with Claude Code, VS Code, Cursor, Windsurf, Cline, Roo Code, and other tools that

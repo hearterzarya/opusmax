@@ -273,10 +273,19 @@ pnpm cli:dev setup    # Run CLI in dev
 ## Git / deploy
 
 - **Branch:** `main` → Vercel auto-deploy from GitHub
+- **Hybrid (optional):** same repo on **Railway** for always-on API — see `docs/RAILWAY.md`, `railway.toml`, `Dockerfile`. Vercel unchanged when Railway env vars unset.
 - **Baseline commit:** `9159be5` (user reverted later upstream experiments to this)
 - Commits after `9159be5` that were removed: upstream provider layer, 529 fallbacks, `/api` root route, Opus 4.8, api-cors/gateway-info
 
 When user says "push kro", check `git status` first — may already be synced.
+
+### Hybrid env (optional)
+
+| Where | Variable | Purpose |
+|-------|----------|---------|
+| Vercel | *(none required)* | Default API stays `https://opusxmax.vercel.app/api` |
+| Vercel | `NEXT_PUBLIC_RAILWAY_API_URL` | Docs show Railway fast endpoint |
+| Railway | Copy Vercel env + `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_SITE_URL` | Always-on API, same Neon/Redis |
 
 ---
 
