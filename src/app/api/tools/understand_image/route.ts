@@ -3,6 +3,7 @@ import { ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
 import { upstreamMessagesUrl } from '@/lib/upstream-anthropic'
+import { getUpstreamApiKey, upstreamFetch } from '@/lib/upstream-fetch'
 import { z } from 'zod'
 
 const understandImageSchema = z.object({
@@ -64,11 +65,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const upstreamResponse = await fetch(messagesUrl, {
+    const upstreamKey = getUpstreamApiKey()
+    if (!upstreamKey) {
+      return createErrorResponse(
+        ErrorCodes.UPSTREAM_ERROR,
+        'Server misconfigured: ANTHROPIC_API_KEY is missing',
+        500
+      )
+    }
+
+    const upstreamResponse = await upstreamFetch(messagesUrl, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+        'x-api-key': upstreamKey,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({

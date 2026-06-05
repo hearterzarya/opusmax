@@ -3,6 +3,7 @@ import { ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
 import { upstreamModelsListUrl } from '@/lib/upstream-anthropic'
+import { getUpstreamApiKey, upstreamFetch } from '@/lib/upstream-fetch'
 import {
   getAnthropicModelsListFallback,
   mergeDefaultModelsWithUpstream,
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
 
     const staticBody = getAnthropicModelsListFallback() as Record<string, unknown>
     const fetchUpstream = envTruthy(process.env.GATEWAY_FETCH_UPSTREAM_MODELS)
-    const upstreamKey = (process.env.ANTHROPIC_API_KEY || '').trim()
+    const upstreamKey = getUpstreamApiKey()
     const disableStaticOnUpstreamFailure =
       process.env.GATEWAY_DISABLE_MODELS_FALLBACK === '1'
 
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
     const search = request.nextUrl.search
     const modelsUrl = search ? `${baseModelsUrl}${search}` : baseModelsUrl
 
-    const upstreamResponse = await fetch(modelsUrl, {
+    const upstreamResponse = await upstreamFetch(modelsUrl, {
       method: 'GET',
       headers: {
         'x-api-key': upstreamKey,

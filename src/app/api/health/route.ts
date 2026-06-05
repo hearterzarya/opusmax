@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { redis } from '@/lib/redis'
 import { upstreamModelsListUrl } from '@/lib/upstream-anthropic'
+import { upstreamFetch } from '@/lib/upstream-fetch'
 
 async function checkRedisHealth(): Promise<{ status: string; latencyMs: number | null }> {
   const start = Date.now()
@@ -37,7 +38,7 @@ async function checkUpstreamHealth(): Promise<{ status: string; latencyMs: numbe
     const timeoutId = setTimeout(() => controller.abort(), 5000)
     const headers: Record<string, string> = { 'anthropic-version': '2023-06-01' }
     if (process.env.ANTHROPIC_API_KEY) headers['x-api-key'] = process.env.ANTHROPIC_API_KEY
-    const response = await fetch(url, { method: 'GET', headers, signal: controller.signal })
+    const response = await upstreamFetch(url, { method: 'GET', headers, signal: controller.signal })
     clearTimeout(timeoutId)
 
     // Any 2xx OR 4xx ⇒ upstream is reachable & responsive (auth/quota issues

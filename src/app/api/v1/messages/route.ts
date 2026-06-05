@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { hashApiKey, ErrorCodes, createErrorResponse } from '@/lib/apikey'
+import { ErrorCodes, createErrorResponse } from '@/lib/apikey'
+import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
 import { checkRateLimit } from '@/lib/redis'
 import { QUOTA_WINDOW_SECONDS, reserveRollingWindowQuota, settleRollingWindowQuota } from '@/lib/quota'
-import { isApiKeyPastExpiry } from '@/lib/api-key-expiry'
 import { upstreamMessagesUrl } from '@/lib/upstream-anthropic'
+import { getUpstreamApiKey, upstreamFetch } from '@/lib/upstream-fetch'
 import { z } from 'zod'
 
 const messageSchema = z
@@ -46,11 +47,6 @@ function getModelMultiplier(model: string): number {
   return SONNET_COST_MULTIPLIER
 }
 
-function getUpstreamApiKey(): string | null {
-  const key = (process.env.ANTHROPIC_API_KEY || '').trim()
-  return key || null
-}
-
 function isDatabaseUnavailableError(error: unknown): boolean {
   if (error instanceof Prisma.PrismaClientInitializationError) return true
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -62,10 +58,6 @@ function isDatabaseUnavailableError(error: unknown): boolean {
   )
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 function formatDuration(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000))
   const h = Math.floor(totalSec / 3600)
@@ -74,88 +66,9 @@ function formatDuration(ms: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-async function validateApiKey(apiKey: string) {
-  const keyHash = await hashApiKey(apiKey)
-
-  let key: Awaited<ReturnType<typeof prisma.apiKey.findUnique>> | null = null
-  let lastError: unknown = null
-
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      key = await prisma.apiKey.findUnique({
-        where: { keyHash },
-        include: { plan: true },
-      })
-      lastError = null
-      break
-    } catch (error) {
-      lastError = error
-      if (!isDatabaseUnavailableError(error) || attempt === 1) {
-        throw error
-      }
-      await sleep(300)
-    }
-  }
-
-  if (lastError) throw lastError
-
-  if (!key) {
-    return { valid: false, error: createErrorResponse(ErrorCodes.INVALID_API_KEY, 'API key not found', 401) }
-  }
-  if (key.status === 'REVOKED') {
-    return { valid: false, error: createErrorResponse(ErrorCodes.KEY_INACTIVE, 'API key has been revoked', 403) }
-  }
-  if (key.status === 'PAUSED') {
-    return { valid: false, error: createErrorResponse(ErrorCodes.KEY_INACTIVE, 'API key is paused', 403) }
-  }
-
-  if (isApiKeyPastExpiry(key.expiresAt)) {
-    await prisma.apiKey.update({
-      where: { id: key.id },
-      data: { status: 'EXPIRED' },
-    })
-    return {
-      valid: false,
-      error: createErrorResponse(ErrorCodes.KEY_EXPIRED, 'API key has expired', 403, {
-        expires_at: key.expiresAt ? new Date(key.expiresAt).toISOString() : null,
-        hint:
-          'Create keys in the same deployment as ANTHROPIC_BASE_URL. Clear expiry: pnpm db:clear-key-expiry',
-      }),
-    }
-  }
-
-  // Stale EXPIRED row (e.g. expiresAt was extended in DB) — reopen for use.
-  if (key.status === 'EXPIRED') {
-    await prisma.apiKey.update({
-      where: { id: key.id },
-      data: { status: 'ACTIVE' },
-    })
-    const refreshed = await prisma.apiKey.findUnique({
-      where: { id: key.id },
-      include: { plan: true },
-    })
-    if (!refreshed) {
-      return { valid: false, error: createErrorResponse(ErrorCodes.INVALID_API_KEY, 'API key not found', 401) }
-    }
-    return { valid: true, key: refreshed }
-  }
-
-  return { valid: true, key }
-}
-
-function extractAuthKey(request: NextRequest): string | null {
-  const apiKey = request.headers.get('x-api-key')
-  if (apiKey) return apiKey
-
-  const authHeader = request.headers.get('authorization')
-  if (authHeader?.startsWith('Bearer ')) return authHeader.slice(7)
-
-  return null
-}
-
 interface TokenEstimate {
-  raw: number      // raw character-based estimate
-  weighted: number // weighted by model multiplier (used for budget enforcement)
+  raw: number
+  weighted: number
 }
 
 function estimateTokens(requestBody: z.infer<typeof messageSchema>): TokenEstimate {
@@ -212,15 +125,10 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now()
 
   try {
-    const apiKey = extractAuthKey(request)
-    if (!apiKey) {
-      return createErrorResponse(ErrorCodes.INVALID_API_KEY, 'API key required', 401)
-    }
+    const auth = await validateActiveApiKeyFromRequest(request)
+    if (!auth.ok) return auth.response
 
-    const validation = await validateApiKey(apiKey)
-    if (!validation.valid) return validation.error
-
-    const key = validation.key!
+    const key = auth.key
 
     // RPM rate limit
     const rpmLimit = key.rpmLimit || 60
@@ -314,7 +222,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const upstreamResponse = await fetch(resolvedMessagesUrl, {
+    const upstreamResponse = await upstreamFetch(resolvedMessagesUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

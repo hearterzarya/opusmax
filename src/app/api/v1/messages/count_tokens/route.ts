@@ -3,6 +3,7 @@ import { ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
 import { upstreamCountTokensUrl } from '@/lib/upstream-anthropic'
+import { getUpstreamApiKey, upstreamFetch } from '@/lib/upstream-fetch'
 import { z } from 'zod'
 
 const countTokensSchema = z
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const validatedBody = countTokensSchema.parse(body)
 
-    const upstreamKey = (process.env.ANTHROPIC_API_KEY || '').trim()
+    const upstreamKey = getUpstreamApiKey()
     if (!upstreamKey) {
       return createErrorResponse(
         ErrorCodes.UPSTREAM_ERROR,
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
     }
 
     const countUrl = upstreamCountTokensUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
-    const upstreamResponse = await fetch(countUrl, {
+    const upstreamResponse = await upstreamFetch(countUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

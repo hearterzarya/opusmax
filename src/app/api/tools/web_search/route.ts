@@ -3,6 +3,7 @@ import { ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
 import { upstreamMessagesUrl } from '@/lib/upstream-anthropic'
+import { getUpstreamApiKey, upstreamFetch } from '@/lib/upstream-fetch'
 import { z } from 'zod'
 
 const webSearchSchema = z.object({
@@ -24,11 +25,20 @@ export async function POST(request: NextRequest) {
     const maxResults = validatedBody.max_results ?? 5
     const messagesUrl = upstreamMessagesUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
 
-    const upstreamResponse = await fetch(messagesUrl, {
+    const upstreamKey = getUpstreamApiKey()
+    if (!upstreamKey) {
+      return createErrorResponse(
+        ErrorCodes.UPSTREAM_ERROR,
+        'Server misconfigured: ANTHROPIC_API_KEY is missing',
+        500
+      )
+    }
+
+    const upstreamResponse = await upstreamFetch(messagesUrl, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+        'x-api-key': upstreamKey,
         'anthropic-version': '2023-06-01',
         // Enables Anthropic first-party web search tool.
         'anthropic-beta': 'web-search-2025-03-05',

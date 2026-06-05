@@ -5,6 +5,7 @@ import { ensureSameOrigin } from '@/lib/csrf'
 import { createErrorResponse, ErrorCodes, generateKeyPair } from '@/lib/apikey'
 import { prisma } from '@/lib/prisma'
 import { resetRollingWindowQuota } from '@/lib/quota'
+import { invalidateApiKeyCache } from '@/lib/api-key-auth'
 
 const WINDOW_PLAN_BUDGETS = {
   max5x: 5_000_000n,
@@ -61,7 +62,7 @@ export async function PATCH(
 
     const existing = await prisma.apiKey.findUnique({
       where: { id },
-      select: { id: true, name: true, status: true },
+      select: { id: true, name: true, status: true, keyHash: true },
     })
     if (!existing) {
       return createErrorResponse(ErrorCodes.INVALID_API_KEY, 'API key not found', 404)
@@ -113,6 +114,7 @@ export async function PATCH(
         })
         .catch((error) => console.warn('Audit log write failed:', error))
 
+      await invalidateApiKeyCache(existing.keyHash).catch(() => undefined)
       return NextResponse.json({ success: true, key })
     }
 
@@ -159,6 +161,7 @@ export async function PATCH(
         })
         .catch((error) => console.warn('Audit log write failed:', error))
 
+      await invalidateApiKeyCache(existing.keyHash).catch(() => undefined)
       return NextResponse.json({ success: true, key })
     }
 
@@ -221,10 +224,12 @@ export async function PATCH(
         })
         .catch((error) => console.warn('Audit log write failed:', error))
 
+      await invalidateApiKeyCache(existing.keyHash).catch(() => undefined)
       return NextResponse.json({ success: true, key, rawKey: raw, rotated: true })
     }
 
     if (action === 'delete') {
+      await invalidateApiKeyCache(existing.keyHash).catch(() => undefined)
       await prisma.apiKey.delete({ where: { id: existing.id } })
 
       prisma.auditLog
@@ -270,6 +275,7 @@ export async function PATCH(
       })
       .catch((error) => console.warn('Audit log write failed:', error))
 
+    await invalidateApiKeyCache(existing.keyHash).catch(() => undefined)
     return NextResponse.json({ success: true, key })
   } catch (error) {
     if (error instanceof z.ZodError) {

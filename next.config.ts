@@ -3,6 +3,7 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   outputFileTracingRoot: __dirname,
+  serverExternalPackages: ['undici'],
   experimental: {
     serverActions: {
       bodySizeLimit: '10mb',
