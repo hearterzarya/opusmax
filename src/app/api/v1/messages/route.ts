@@ -125,7 +125,10 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now()
 
   try {
-    const auth = await validateActiveApiKeyFromRequest(request)
+    const [auth, requestBody] = await Promise.all([
+      validateActiveApiKeyFromRequest(request),
+      request.json(),
+    ])
     if (!auth.ok) return auth.response
 
     const key = auth.key
@@ -142,7 +145,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const requestBody = await request.clone().json()
     const validatedBody = messageSchema.parse(requestBody)
     const tokens = estimateTokens(validatedBody)
 
@@ -401,6 +403,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(responseData, { status: upstreamResponse.status })
   } catch (error) {
+    if (error instanceof SyntaxError) {
+      return createErrorResponse(ErrorCodes.VALIDATION_ERROR, 'Invalid JSON body', 400)
+    }
     if (error instanceof z.ZodError) {
       const message = error.issues.map((e) => e.message).join(', ')
       return createErrorResponse(

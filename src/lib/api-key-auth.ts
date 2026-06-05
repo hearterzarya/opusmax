@@ -7,6 +7,41 @@ import { cacheGet, cacheSet } from '@/lib/redis'
 
 const KEY_CACHE_PREFIX = 'api_key_auth:v1:'
 const KEY_CACHE_TTL_SECONDS = 60
+const KEY_L1_TTL_MS = 30_000
+const KEY_L1_MAX_ENTRIES = 512
+
+type L1Entry = { row: CachedApiKeyRow; expiresAt: number }
+
+const globalKeyL1 = globalThis as unknown as { apiKeyL1Cache?: Map<string, L1Entry> }
+const keyL1Cache = globalKeyL1.apiKeyL1Cache ?? new Map<string, L1Entry>()
+if (process.env.NODE_ENV !== 'production') {
+  globalKeyL1.apiKeyL1Cache = keyL1Cache
+}
+
+function getL1Key(keyHash: string): ValidatedApiKey | null {
+  const entry = keyL1Cache.get(keyHash)
+  if (!entry) return null
+  if (Date.now() > entry.expiresAt) {
+    keyL1Cache.delete(keyHash)
+    return null
+  }
+  return deserializeKeyRow(entry.row)
+}
+
+function setL1Key(keyHash: string, key: ValidatedApiKey): void {
+  if (keyL1Cache.size >= KEY_L1_MAX_ENTRIES) {
+    const oldest = keyL1Cache.keys().next().value
+    if (oldest) keyL1Cache.delete(oldest)
+  }
+  keyL1Cache.set(keyHash, {
+    row: serializeKeyRow(key),
+    expiresAt: Date.now() + KEY_L1_TTL_MS,
+  })
+}
+
+function deleteL1Key(keyHash: string): void {
+  keyL1Cache.delete(keyHash)
+}
 
 export type ValidatedApiKey = {
   id: string
@@ -60,6 +95,7 @@ function deserializeKeyRow(row: CachedApiKeyRow): ValidatedApiKey {
 }
 
 export async function invalidateApiKeyCache(keyHash: string): Promise<void> {
+  deleteL1Key(keyHash)
   await cacheSet(`${KEY_CACHE_PREFIX}${keyHash}`, 'invalidated', 1)
 }
 
@@ -94,11 +130,16 @@ async function loadKeyFromDatabase(keyHash: string): Promise<ValidatedApiKey | n
 }
 
 async function resolveApiKeyRecord(keyHash: string): Promise<ValidatedApiKey | null> {
+  const l1Hit = getL1Key(keyHash)
+  if (l1Hit) return l1Hit
+
   const cacheKey = `${KEY_CACHE_PREFIX}${keyHash}`
   const cached = await cacheGet(cacheKey)
   if (cached && cached !== 'invalidated') {
     try {
-      return deserializeKeyRow(JSON.parse(cached) as CachedApiKeyRow)
+      const key = deserializeKeyRow(JSON.parse(cached) as CachedApiKeyRow)
+      setL1Key(keyHash, key)
+      return key
     } catch {
       /* fall through to DB */
     }
@@ -109,6 +150,7 @@ async function resolveApiKeyRecord(keyHash: string): Promise<ValidatedApiKey | n
     return null
   }
 
+  setL1Key(keyHash, key)
   await cacheSet(cacheKey, JSON.stringify(serializeKeyRow(key)), KEY_CACHE_TTL_SECONDS)
   return key
 }
