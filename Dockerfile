@@ -10,6 +10,7 @@ RUN npm install -g pnpm && pnpm install --frozen-lockfile
 
 # Rebuild the source code only when needed
 FROM node:20-alpine AS builder
+RUN npm install -g pnpm
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -33,9 +34,12 @@ RUN adduser --system --uid 1001 nextjs
 
 # Copy built assets
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next ./.next
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
 
-# Set permissions
-RUN chown nextjs:nodejs .next
+# Set permissions for .next cache
+RUN mkdir -p .next/cache && chown -R nextjs:nodejs .next
 
 USER nextjs
 
