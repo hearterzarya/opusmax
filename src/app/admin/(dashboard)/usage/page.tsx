@@ -127,9 +127,10 @@ export default function AdminUsagePage() {
             className={inputClass}
           >
             <option value="">All models</option>
-            <option value="claude-opus-4-5">Opus 4</option>
-            <option value="claude-sonnet-4-5">Sonnet 4</option>
-            <option value="claude-haiku-4-5">Haiku 4</option>
+            <option value="claude-opus-4-8">Opus 4.8</option>
+            <option value="claude-opus-4-7">Opus 4.7</option>
+            <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+            <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
           </select>
 
           <div className="flex items-center gap-2">

@@ -129,10 +129,11 @@ Admin POST routes have Origin/CSRF protection.
 
 ## Models catalog
 
-Defined in `src/lib/anthropic-models-fallback.ts` — **only these 3** are advertised:
+Defined in `src/lib/anthropic-models-fallback.ts`:
 
 | Model ID | Display |
 |----------|---------|
+| `claude-opus-4-8` | Opus 4.8 (latest flagship) |
 | `claude-opus-4-7` | Opus 4.7 |
 | `claude-sonnet-4-6` | Sonnet 4.6 |
 | `claude-haiku-4-5-20251001` | Haiku 4.5 |
@@ -143,7 +144,7 @@ Defined in `src/lib/anthropic-models-fallback.ts` — **only these 3** are adver
 
 Docs mirror models in `src/lib/docs-config.ts` (`AVAILABLE_MODELS`, `API_ENDPOINTS`).
 
-> **Note:** Opus 4.8 (`claude-opus-4-8`) was added in a later commit that was reverted. Re-add only if user asks.
+> **Note:** Default Opus for Claude Code / CLI is `claude-opus-4-8`. Opus 4.7 remains available for backward compatibility.
 
 ---
 

@@ -11,7 +11,7 @@ const sections: Section[] = [
   {
     title: '1. Information We Collect',
     body:
-      'We collect metadata about your API usage including the model used (e.g., claude-opus-4-7), token counts (input and output), request timestamps, latency measurements, status codes, and errors. We do NOT store prompt content, model responses, or your raw API keys (only hashed versions).',
+      'We collect metadata about your API usage including the model used (e.g., claude-opus-4-8), token counts (input and output), request timestamps, latency measurements, status codes, and errors. We do NOT store prompt content, model responses, or your raw API keys (only hashed versions).',
   },
   {
     title: '2. How We Use Information',

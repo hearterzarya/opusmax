@@ -126,7 +126,7 @@ export const CLAUDE_CODE_SETTINGS_JSON = `{
     "ANTHROPIC_MODEL": "claude-sonnet-4-6",
     "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-5-20251001",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-7",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5-20251001",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   },
@@ -183,6 +183,12 @@ export const MESSAGES_RESPONSE_CODE = `{
 
 export const MODELS_RESPONSE_CODE = `{
   "data": [
+    {
+      "id": "claude-opus-4-8",
+      "object": "model",
+      "display_name": "Claude Opus 4.8",
+      "created_at": "2026-05-28T00:00:00Z"
+    },
     {
       "id": "claude-opus-4-7",
       "object": "model",
@@ -245,12 +251,20 @@ export const IMAGE_ANALYSIS_REQUEST_CODE = `{
 
 export const AVAILABLE_MODELS = [
   {
+    name: 'Opus 4.8',
+    badge: 'Latest',
+    badgeClass: 'bg-amber-500/15 text-amber-200 ring-amber-500/30',
+    id: 'claude-opus-4-8',
+    description:
+      'Latest flagship — 1M context, adaptive thinking, and top-tier agentic coding performance.',
+  },
+  {
     name: 'Opus 4.7',
     badge: 'Premium',
-    badgeClass: 'bg-amber-500/15 text-amber-200 ring-amber-500/30',
+    badgeClass: 'bg-amber-500/10 text-amber-200/70 ring-amber-500/20',
     id: 'claude-opus-4-7',
     description:
-      'Flagship model for advanced reasoning, coding, long-context tasks, and agentic workflows.',
+      'Previous Opus generation for advanced reasoning, coding, and long-context workflows.',
   },
   {
     name: 'Sonnet 4.6',

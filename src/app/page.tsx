@@ -18,9 +18,9 @@ import { SiteFooter } from '@/components/site/site-footer'
 
 const models = [
   {
-    name: 'Opus 4.7',
-    id: 'claude-opus-4-7',
-    description: 'Flagship intelligence — 1M context window, agentic coding, deep reasoning.',
+    name: 'Opus 4.8',
+    id: 'claude-opus-4-8',
+    description: 'Latest flagship — 1M context, adaptive thinking, and agentic coding at the top tier.',
     accent: 'from-violet-500 via-fuchsia-500 to-rose-500',
     glow: 'glow-violet',
   },
@@ -95,7 +95,7 @@ $ curl $ANTHROPIC_BASE_URL/messages \\
     -H "anthropic-version: 2023-06-01" \\
     -H "content-type: application/json" \\
     -d '{
-      "model": "claude-opus-4-7",
+      "model": "claude-opus-4-8",
       "max_tokens": 256,
       "messages": [{"role":"user","content":"hello"}]
     }'
@@ -122,7 +122,7 @@ export default function HomePage() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
               </span>
-              All Claude models live · Opus 4.7, Sonnet 4.6, Haiku 4.5
+              All Claude models live · Opus 4.8, Sonnet 4.6, Haiku 4.5
             </div>
 
             <h1 className="font-display tracking-display mx-auto mt-7 max-w-4xl text-balance text-6xl font-semibold leading-[1.02] text-white md:text-[88px]">
