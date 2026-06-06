@@ -8,3 +8,9 @@ node_modules
 coverage
 .vercel
 packages/cli/dist
+
+# Optional Cloudflare OpenNext (safe to delete with docs/CLOUDFLARE.md remove guide)
+.open-next
+.wrangler
+.dev.vars
+cloudflare-env.d.ts

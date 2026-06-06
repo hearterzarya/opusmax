@@ -274,6 +274,7 @@ pnpm cli:dev setup    # Run CLI in dev
 
 - **Branch:** `main` → Vercel auto-deploy from GitHub
 - **Hybrid (optional):** same repo on **Railway** for always-on API — see `docs/RAILWAY.md`, `railway.toml`, `Dockerfile`. Vercel unchanged when Railway env vars unset.
+- **Cloudflare (optional, experimental):** OpenNext via `pnpm cf:deploy` — see `docs/CLOUDFLARE.md`. Remove guide included; Railway/Vercel default unchanged.
 - **Baseline commit:** `9159be5` (user reverted later upstream experiments to this)
 - Commits after `9159be5` that were removed: upstream provider layer, 529 fallbacks, `/api` root route, Opus 4.8, api-cors/gateway-info
 
