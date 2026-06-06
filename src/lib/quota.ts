@@ -1,13 +1,11 @@
 import { prisma } from '@/lib/prisma'
-import { redis } from '@/lib/redis'
+import { redis, shouldUseDistributedRedis } from '@/lib/redis'
 
 export const QUOTA_WINDOW_SECONDS = 5 * 60 * 60
 const QUOTA_WINDOW_MS = QUOTA_WINDOW_SECONDS * 1000
 /** Keep reset marker long enough for DB/UI alignment; rolling enforcement reads it on every request. */
 export const RESET_MARKER_TTL_SECONDS = 30 * 24 * 60 * 60
-const HAS_REAL_REDIS =
-  Boolean(process.env.REDIS_URL?.trim()) &&
-  !(process.env.REDIS_URL?.includes('xxx.upstash.io') ?? false)
+const HAS_REAL_REDIS = shouldUseDistributedRedis()
 const RESET_MARKER_PREFIX = 'token_budget_reset:'
 
 type ReserveQuotaResult = {

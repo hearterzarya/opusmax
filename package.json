@@ -29,6 +29,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "@hookform/resolvers": "^4.0.0",
+    "@neondatabase/serverless": "^1.1.0",
+    "@prisma/adapter-neon": "^7.8.0",
     "@prisma/client": "^6.6.0",
     "@radix-ui/react-accordion": "^1.2.3",
     "@radix-ui/react-alert-dialog": "^1.1.6",
@@ -46,6 +48,7 @@
     "@radix-ui/react-tabs": "^1.1.3",
     "@radix-ui/react-toast": "^1.2.7",
     "@radix-ui/react-tooltip": "^1.1.8",
+    "@upstash/redis": "^1.38.0",
     "bcryptjs": "^3.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -69,6 +72,7 @@
     "@types/node": "^22.13.10",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.6",
+    "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.21.0",
     "eslint-config-next": "^15.2.4",
@@ -77,6 +81,7 @@
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
-    "wrangler": "^4.98.0"
+    "wrangler": "^4.98.0",
+    "ws": "^8.21.0"
   }
 }

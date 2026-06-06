@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { hashApiKey, ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { isApiKeyPastExpiry } from '@/lib/api-key-expiry'
 import { IS_RAILWAY_RUNTIME } from '@/lib/deploy-config'
-import { cacheGet, cacheSet, shouldUseRealRedis } from '@/lib/redis'
+import { cacheGet, cacheSet, shouldUseDistributedRedis } from '@/lib/redis'
 
 const KEY_CACHE_PREFIX = 'api_key_auth:v1:'
 const KEY_CACHE_TTL_SECONDS = 60
@@ -46,10 +46,10 @@ function deleteL1Key(keyHash: string): void {
 
 function shouldUseRedisKeyCache(): boolean {
   const flag = process.env.GATEWAY_REDIS_KEY_CACHE?.trim()
-  if (flag === '1' || flag === 'true') return shouldUseRealRedis()
+  if (flag === '1' || flag === 'true') return shouldUseDistributedRedis()
   if (flag === '0' || flag === 'false') return false
   // Railway: L1 + DB is enough for a single always-on instance.
-  return !IS_RAILWAY_RUNTIME && shouldUseRealRedis()
+  return !IS_RAILWAY_RUNTIME && shouldUseDistributedRedis()
 }
 
 export type ValidatedApiKey = {

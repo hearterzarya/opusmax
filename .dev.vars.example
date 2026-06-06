@@ -1,2 +1,19 @@
 # Copy to .dev.vars for local `pnpm cf:preview` (not committed).
 NEXTJS_ENV=development
+OPUSX_RUNTIME=cloudflare
+
+# Neon (same DATABASE_URL as Vercel/Railway)
+DATABASE_URL=postgresql://...
+
+# Upstash REST (required on Workers — TCP redis.io does not work)
+UPSTASH_REDIS_REST_URL=https://YOUR-DB.upstash.io
+UPSTASH_REDIS_REST_TOKEN=YOUR_TOKEN
+
+# Gateway (same as Railway/Vercel)
+ANTHROPIC_API_KEY=sk-ant-...
+UPSTREAM_ANTHROPIC_BASE_URL=https://api.opusmax.pro
+JWT_SECRET=...
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=...
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8787/api
+NEXT_PUBLIC_SITE_URL=http://localhost:8787

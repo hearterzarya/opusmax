@@ -3,7 +3,12 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   outputFileTracingRoot: __dirname,
-  serverExternalPackages: ['undici'],
+  serverExternalPackages: [
+    'undici',
+    '@neondatabase/serverless',
+    '@prisma/adapter-neon',
+    '@upstash/redis',
+  ],
   experimental: {
     serverActions: {
       bodySizeLimit: '10mb',

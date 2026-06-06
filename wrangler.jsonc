@@ -15,5 +15,10 @@
       "binding": "WORKER_SELF_REFERENCE",
       "service": "opusmax-gateway"
     }
-  ]
+  ],
+  "vars": {
+    "OPUSX_RUNTIME": "cloudflare"
+  }
+  // Optional Hyperdrive (alternative to Neon HTTP driver):
+  // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "YOUR_HYPERDRIVE_ID" }]
 }
