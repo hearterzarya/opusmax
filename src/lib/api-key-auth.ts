@@ -3,7 +3,8 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { hashApiKey, ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { isApiKeyPastExpiry } from '@/lib/api-key-expiry'
-import { cacheGet, cacheSet } from '@/lib/redis'
+import { IS_RAILWAY_RUNTIME } from '@/lib/deploy-config'
+import { cacheGet, cacheSet, shouldUseRealRedis } from '@/lib/redis'
 
 const KEY_CACHE_PREFIX = 'api_key_auth:v1:'
 const KEY_CACHE_TTL_SECONDS = 60
@@ -41,6 +42,14 @@ function setL1Key(keyHash: string, key: ValidatedApiKey): void {
 
 function deleteL1Key(keyHash: string): void {
   keyL1Cache.delete(keyHash)
+}
+
+function useRedisKeyCache(): boolean {
+  const flag = process.env.GATEWAY_REDIS_KEY_CACHE?.trim()
+  if (flag === '1' || flag === 'true') return shouldUseRealRedis()
+  if (flag === '0' || flag === 'false') return false
+  // Railway: L1 + DB is enough for a single always-on instance.
+  return !IS_RAILWAY_RUNTIME && shouldUseRealRedis()
 }
 
 export type ValidatedApiKey = {
@@ -96,7 +105,9 @@ function deserializeKeyRow(row: CachedApiKeyRow): ValidatedApiKey {
 
 export async function invalidateApiKeyCache(keyHash: string): Promise<void> {
   deleteL1Key(keyHash)
-  await cacheSet(`${KEY_CACHE_PREFIX}${keyHash}`, 'invalidated', 1)
+  if (useRedisKeyCache()) {
+    await cacheSet(`${KEY_CACHE_PREFIX}${keyHash}`, 'invalidated', 1)
+  }
 }
 
 async function loadKeyFromDatabase(keyHash: string): Promise<ValidatedApiKey | null> {
@@ -134,14 +145,16 @@ async function resolveApiKeyRecord(keyHash: string): Promise<ValidatedApiKey | n
   if (l1Hit) return l1Hit
 
   const cacheKey = `${KEY_CACHE_PREFIX}${keyHash}`
-  const cached = await cacheGet(cacheKey)
-  if (cached && cached !== 'invalidated') {
-    try {
-      const key = deserializeKeyRow(JSON.parse(cached) as CachedApiKeyRow)
-      setL1Key(keyHash, key)
-      return key
-    } catch {
-      /* fall through to DB */
+  if (useRedisKeyCache()) {
+    const cached = await cacheGet(cacheKey)
+    if (cached && cached !== 'invalidated') {
+      try {
+        const key = deserializeKeyRow(JSON.parse(cached) as CachedApiKeyRow)
+        setL1Key(keyHash, key)
+        return key
+      } catch {
+        /* fall through to DB */
+      }
     }
   }
 
@@ -151,7 +164,9 @@ async function resolveApiKeyRecord(keyHash: string): Promise<ValidatedApiKey | n
   }
 
   setL1Key(keyHash, key)
-  await cacheSet(cacheKey, JSON.stringify(serializeKeyRow(key)), KEY_CACHE_TTL_SECONDS)
+  if (useRedisKeyCache()) {
+    await cacheSet(cacheKey, JSON.stringify(serializeKeyRow(key)), KEY_CACHE_TTL_SECONDS)
+  }
   return key
 }
 

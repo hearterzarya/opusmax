@@ -174,21 +174,48 @@ const globalForRedis = globalThis as unknown as {
   redisMockWarned?: boolean
 }
 
-function createRedisClient(): RedisInterface {
-  const redisUrl = process.env.REDIS_URL?.trim()
-  const isPlaceholderUrl = !redisUrl || redisUrl.includes('xxx.upstash.io')
+function isPlaceholderRedisUrl(url: string | undefined): boolean {
+  return !url || url.includes('xxx.upstash.io')
+}
 
-  if (isPlaceholderUrl) {
+/** Real Redis only when URL is valid and not opted out (Railway defaults to in-memory for speed). */
+export function shouldUseRealRedis(): boolean {
+  const redisUrl = process.env.REDIS_URL?.trim()
+  if (isPlaceholderRedisUrl(redisUrl)) return false
+
+  const enforce = process.env.GATEWAY_REDIS_ENFORCE?.trim()
+  if (enforce === '1' || enforce === 'true') return true
+  if (enforce === '0' || enforce === 'false') return false
+
+  // Railway always-on single instance: remote Redis RTT (esp. cross-region) adds ~200–400ms/request.
+  if (process.env.RAILWAY_ENVIRONMENT != null) return false
+
+  return true
+}
+
+function createRedisClient(): RedisInterface {
+  if (!shouldUseRealRedis()) {
     if (!globalForRedis.redisMockWarned) {
       globalForRedis.redisMockWarned = true
-      console.warn('REDIS_URL is missing or placeholder, using mock Redis for development')
+      const hasUrl = Boolean(process.env.REDIS_URL?.trim()) && !isPlaceholderRedisUrl(process.env.REDIS_URL)
+      if (hasUrl && process.env.RAILWAY_ENVIRONMENT != null) {
+        console.warn(
+          'Railway fast path: in-memory Redis (rate/quota). Set GATEWAY_REDIS_ENFORCE=1 when Redis is in the same region as Railway.'
+        )
+      } else {
+        console.warn('REDIS_URL is missing or placeholder, using mock Redis for development')
+      }
     }
     return createMockRedis()
   }
 
+  const redisUrl = process.env.REDIS_URL!.trim()
   const redis = new Redis(redisUrl, {
     maxRetriesPerRequest: 3,
     lazyConnect: true,
+    enableReadyCheck: false,
+    connectTimeout: 10_000,
+    keepAlive: 30_000,
   })
 
   redis.on('error', () => {
