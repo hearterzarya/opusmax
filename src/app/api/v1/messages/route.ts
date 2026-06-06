@@ -217,8 +217,36 @@ export async function POST(request: NextRequest) {
     // Forward upstream
     let upstreamResponse: Response
 
+    // Model mapping for Bifrost
+    const MODEL_MAP: Record<string, string> = {
+      "claude-opus-4-8": "anthropic/claude-opus-4-8",
+      "claude-sonnet-4-5": "anthropic/claude-sonnet-4-5",
+      "claude-haiku-4-5": "anthropic/claude-haiku-4-5",
+    }
+
+    // Map model before forwarding
+    const upstreamBody = { ...validatedBody }
+    const originalModel = validatedBody.model
+    let mappedModel = originalModel
+
+    if (originalModel.startsWith('anthropic/')) {
+      mappedModel = originalModel
+    } else if (MODEL_MAP[originalModel]) {
+      mappedModel = MODEL_MAP[originalModel]
+    } else {
+      mappedModel = `anthropic/${originalModel}`
+    }
+
+    upstreamBody.model = mappedModel
+
+    // Temporary safe log (no secrets)
+    console.log('[Bifrost] Incoming model:', originalModel, '| Mapped model:', mappedModel)
+
     // Check if Bifrost is configured and available
     const bifrostBaseUrl = process.env.BIFROST_BASE_URL
+    const bifrostUrlPath = bifrostBaseUrl ? `${bifrostBaseUrl}/anthropic/v1/messages` : null
+
+    console.log('[Bifrost] URL path:', bifrostUrlPath)
 
     if (bifrostBaseUrl) {
       try {
@@ -228,8 +256,8 @@ export async function POST(request: NextRequest) {
           throw new Error(`Bifrost not available: ${bifrostCheck.error}`)
         }
 
-        // Forward to Bifrost
-        upstreamResponse = await forwardAnthropicMessages(validatedBody, {
+        // Forward to Bifrost with mapped model and WITHOUT customer API key
+        upstreamResponse = await forwardAnthropicMessages(upstreamBody, {
           bifrostBaseUrl,
           bifrostApiKey: process.env.BIFROST_INTERNAL_KEY,
           timeout: 30000, // 30 second timeout
@@ -338,7 +366,7 @@ export async function POST(request: NextRequest) {
           .create({
             data: {
               apiKeyId: key.id,
-              model: validatedBody.model,
+              model: upstreamBody.model,
               inputTokens,
               outputTokens,
               totalTokens: actualTotalTokens,
@@ -438,7 +466,7 @@ export async function POST(request: NextRequest) {
       .create({
         data: {
           apiKeyId: key.id,
-          model: validatedBody.model,
+          model: upstreamBody.model,
           inputTokens,
           outputTokens,
           totalTokens: actualTotalTokens,
