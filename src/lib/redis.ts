@@ -197,12 +197,14 @@ function createRedisClient(): RedisInterface {
   if (!shouldUseRealRedis()) {
     if (!globalForRedis.redisMockWarned) {
       globalForRedis.redisMockWarned = true
-      const hasUrl = Boolean(process.env.REDIS_URL?.trim()) && !isPlaceholderRedisUrl(process.env.REDIS_URL)
-      if (hasUrl && process.env.RAILWAY_ENVIRONMENT != null) {
-        console.warn(
-          'Railway fast path: in-memory Redis (rate/quota). Set GATEWAY_REDIS_ENFORCE=1 when Redis is in the same region as Railway.'
+      const onRailway = process.env.RAILWAY_ENVIRONMENT != null
+      const hasUrl =
+        Boolean(process.env.REDIS_URL?.trim()) && !isPlaceholderRedisUrl(process.env.REDIS_URL)
+      if (onRailway && hasUrl) {
+        console.info(
+          'Railway: REDIS_URL is ignored (in-memory rate/quota). Remove REDIS_URL from Railway Variables.'
         )
-      } else {
+      } else if (!onRailway) {
         console.warn('REDIS_URL is missing or placeholder, using mock Redis for development')
       }
     }

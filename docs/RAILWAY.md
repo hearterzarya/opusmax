@@ -9,7 +9,7 @@ Same repo runs on **both** platforms. Vercel behavior is unchanged when Railway 
 | **Vercel** | Website, admin, docs, API (existing) | `https://opusxmax.vercel.app` |
 | **Railway** | Always-on API (lower latency, streaming) | `https://xxx.up.railway.app` or `https://api.yourdomain.com` |
 
-Both share the **same** Neon `DATABASE_URL` and Upstash `REDIS_URL`.
+Both share the **same** Neon `DATABASE_URL`. **Redis is Vercel-only** — Railway uses in-memory rate/quota (faster, no `REDIS_URL` needed).
 
 ## 1. Railway setup
 
@@ -19,20 +19,20 @@ Both share the **same** Neon `DATABASE_URL` and Upstash `REDIS_URL`.
 4. **Variables** — copy from Vercel, plus Railway-specific:
 
 ```env
-# Same as Vercel
+# Required (same Neon DB as Vercel)
 DATABASE_URL=...
-REDIS_URL=...
 ANTHROPIC_API_KEY=...              # OpusMax Pro upstream key
-UPSTREAM_ANTHROPIC_BASE_URL=...  # OpusMax Pro base URL
+UPSTREAM_ANTHROPIC_BASE_URL=...    # OpusMax Pro base URL
 JWT_SECRET=...
 ADMIN_EMAIL=...
 ADMIN_PASSWORD=...
 
+# Do NOT set REDIS_URL on Railway — it slows every request if Redis is in another region.
+# Rate limit + quota run in-memory on the always-on Railway instance.
+
 # Railway API origin (this service)
 NEXT_PUBLIC_API_BASE_URL=https://YOUR-RAILWAY-DOMAIN/api
 NEXT_PUBLIC_SITE_URL=https://opusxmax.vercel.app
-
-# Optional runtime marker (Railway sets RAILWAY_ENVIRONMENT automatically)
 ```
 
 5. **Resources:** 512MB–1GB RAM, 0.5–1 vCPU, 1 replica
