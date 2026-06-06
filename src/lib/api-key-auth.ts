@@ -44,7 +44,7 @@ function deleteL1Key(keyHash: string): void {
   keyL1Cache.delete(keyHash)
 }
 
-function useRedisKeyCache(): boolean {
+function shouldUseRedisKeyCache(): boolean {
   const flag = process.env.GATEWAY_REDIS_KEY_CACHE?.trim()
   if (flag === '1' || flag === 'true') return shouldUseRealRedis()
   if (flag === '0' || flag === 'false') return false
@@ -105,7 +105,7 @@ function deserializeKeyRow(row: CachedApiKeyRow): ValidatedApiKey {
 
 export async function invalidateApiKeyCache(keyHash: string): Promise<void> {
   deleteL1Key(keyHash)
-  if (useRedisKeyCache()) {
+  if (shouldUseRedisKeyCache()) {
     await cacheSet(`${KEY_CACHE_PREFIX}${keyHash}`, 'invalidated', 1)
   }
 }
@@ -145,7 +145,7 @@ async function resolveApiKeyRecord(keyHash: string): Promise<ValidatedApiKey | n
   if (l1Hit) return l1Hit
 
   const cacheKey = `${KEY_CACHE_PREFIX}${keyHash}`
-  if (useRedisKeyCache()) {
+  if (shouldUseRedisKeyCache()) {
     const cached = await cacheGet(cacheKey)
     if (cached && cached !== 'invalidated') {
       try {
@@ -164,7 +164,7 @@ async function resolveApiKeyRecord(keyHash: string): Promise<ValidatedApiKey | n
   }
 
   setL1Key(keyHash, key)
-  if (useRedisKeyCache()) {
+  if (shouldUseRedisKeyCache()) {
     await cacheSet(cacheKey, JSON.stringify(serializeKeyRow(key)), KEY_CACHE_TTL_SECONDS)
   }
   return key
