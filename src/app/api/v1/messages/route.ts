@@ -7,6 +7,7 @@ import { checkRateLimit } from '@/lib/redis'
 import { QUOTA_WINDOW_SECONDS, reserveRollingWindowQuota, settleRollingWindowQuota } from '@/lib/quota'
 import { upstreamMessagesUrl } from '@/lib/upstream-anthropic'
 import { getUpstreamApiKey, upstreamFetch } from '@/lib/upstream-fetch'
+import { forwardAnthropicMessages, checkBifrostConnection } from '@/lib/bifrost'
 import { z } from 'zod'
 
 const messageSchema = z
@@ -214,28 +215,78 @@ export async function POST(request: NextRequest) {
     }
 
     // Forward upstream
-    const resolvedMessagesUrl = upstreamMessagesUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
-    const upstreamApiKey = getUpstreamApiKey()
-    if (!upstreamApiKey) {
-      return createErrorResponse(
-        ErrorCodes.UPSTREAM_ERROR,
-        'Server misconfigured: ANTHROPIC_API_KEY is missing',
-        500
-      )
-    }
+    let upstreamResponse: Response
 
-    const upstreamResponse = await upstreamFetch(resolvedMessagesUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': upstreamApiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(validatedBody),
-    })
+    // Check if Bifrost is configured and available
+    const bifrostBaseUrl = process.env.BIFROST_BASE_URL
+
+    if (bifrostBaseUrl) {
+      try {
+        // First check Bifrost connection
+        const bifrostCheck = await checkBifrostConnection()
+        if (!bifrostCheck.available) {
+          throw new Error(`Bifrost not available: ${bifrostCheck.error}`)
+        }
+
+        // Forward to Bifrost
+        upstreamResponse = await forwardAnthropicMessages(validatedBody, {
+          bifrostBaseUrl,
+          bifrostApiKey: process.env.BIFROST_INTERNAL_KEY,
+          timeout: 30000, // 30 second timeout
+        })
+      } catch (bifrostError) {
+        // Fallback to direct upstream if Bifrost fails
+        if (process.env.UPSTREAM_ANTHROPIC_BASE_URL) {
+          console.warn('Bifrost failed, falling back to direct upstream:', bifrostError)
+          const resolvedMessagesUrl = upstreamMessagesUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
+          const upstreamApiKey = getUpstreamApiKey()
+          if (!upstreamApiKey) {
+            return createErrorResponse(
+              ErrorCodes.UPSTREAM_ERROR,
+              'Server misconfigured: ANTHROPIC_API_KEY is missing',
+              500
+            )
+          }
+
+          upstreamResponse = await upstreamFetch(resolvedMessagesUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': upstreamApiKey,
+              'anthropic-version': '2023-06-01',
+            },
+            body: JSON.stringify(validatedBody),
+          })
+        } else {
+          throw bifrostError
+        }
+      }
+    } else {
+      // Use direct upstream if Bifrost is not configured
+      const resolvedMessagesUrl = upstreamMessagesUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
+      const upstreamApiKey = getUpstreamApiKey()
+      if (!upstreamApiKey) {
+        return createErrorResponse(
+          ErrorCodes.UPSTREAM_ERROR,
+          'Server misconfigured: ANTHROPIC_API_KEY is missing',
+          500
+        )
+      }
+
+      upstreamResponse = await upstreamFetch(resolvedMessagesUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': upstreamApiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(validatedBody),
+      })
+    }
 
     // Streaming branch: proxy SSE while observing usage events to settle quota.
     if (validatedBody.stream && upstreamResponse.body) {
+      const bifrostBaseUrl = process.env.BIFROST_BASE_URL
       const reader = upstreamResponse.body.getReader()
       const decoder = new TextDecoder()
       let sseBuffer = ''
@@ -268,7 +319,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const finalizeStreamingMetrics = (statusCode: number) => {
+      const finalizeStreamingMetrics = (statusCode: number, provider: string = 'direct') => {
         if (finalized) return
         finalized = true
         const latencyMs = Date.now() - startTime
@@ -309,7 +360,8 @@ export async function POST(request: NextRequest) {
           try {
             const { done, value } = await reader.read()
             if (done) {
-              finalizeStreamingMetrics(upstreamResponse.status)
+              const provider = bifrostBaseUrl ? 'bifrost' : 'direct'
+              finalizeStreamingMetrics(upstreamResponse.status, provider)
               controller.close()
               return
             }
@@ -318,12 +370,14 @@ export async function POST(request: NextRequest) {
               controller.enqueue(value)
             }
           } catch (error) {
-            finalizeStreamingMetrics(499)
+            const provider = bifrostBaseUrl ? 'bifrost' : 'direct'
+            finalizeStreamingMetrics(499, provider)
             controller.error(error)
           }
         },
         cancel() {
-          finalizeStreamingMetrics(499)
+          const provider = bifrostBaseUrl ? 'bifrost' : 'direct'
+          finalizeStreamingMetrics(499, provider)
           reader.cancel().catch(() => undefined)
         },
       })

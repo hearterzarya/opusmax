@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
 import { upstreamModelsListUrl } from '@/lib/upstream-anthropic'
 import { getUpstreamApiKey, upstreamFetch } from '@/lib/upstream-fetch'
+import { getBifrostModels } from '@/lib/bifrost'
 import {
   getAnthropicModelsListFallback,
   mergeDefaultModelsWithUpstream,
@@ -40,11 +41,43 @@ export async function GET(request: NextRequest) {
     const disableStaticOnUpstreamFailure =
       process.env.GATEWAY_DISABLE_MODELS_FALLBACK === '1'
 
+    // Check if Bifrost is configured
+    const bifrostBaseUrl = process.env.BIFROST_BASE_URL
+
     if (!fetchUpstream) {
       bumpLastUsed()
       return NextResponse.json(staticBody, {
         headers: { ...corsHeaders, 'x-opusx-models': 'static' },
       })
+    }
+
+    // Try Bifrost first if configured
+    if (bifrostBaseUrl) {
+      try {
+        const bifrostResponse = await getBifrostModels({
+          bifrostBaseUrl,
+          bifrostApiKey: process.env.BIFROST_INTERNAL_KEY,
+          timeout: 10000,
+        })
+
+        if (bifrostResponse.ok) {
+          let data: unknown
+          try {
+            data = await bifrostResponse.json()
+          } catch {
+            console.error('[models] Bifrost returned non-JSON')
+          }
+          bumpLastUsed()
+          if (data) {
+            const merged = mergeDefaultModelsWithUpstream(staticBody, data)
+            return NextResponse.json(merged, {
+              headers: { ...corsHeaders, 'x-opusx-models': 'bifrost' },
+            })
+          }
+        }
+      } catch (error) {
+        console.warn('[models] Bifrost failed, falling back to direct upstream:', error)
+      }
     }
 
     if (!upstreamKey) {
