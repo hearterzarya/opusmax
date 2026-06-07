@@ -257,6 +257,9 @@ export async function POST(request: NextRequest) {
         }
 
         // Forward to Bifrost with mapped model and WITHOUT customer API key
+        if (!process.env.BIFROST_INTERNAL_KEY) {
+          throw new Error('Server misconfigured: BIFROST_INTERNAL_KEY is missing')
+        }
         upstreamResponse = await forwardAnthropicMessages(upstreamBody, {
           bifrostBaseUrl,
           bifrostApiKey: process.env.BIFROST_INTERNAL_KEY,
