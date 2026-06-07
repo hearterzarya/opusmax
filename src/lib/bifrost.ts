@@ -66,6 +66,72 @@ export async function forwardAnthropicMessages(
 }
 
 /**
+ * Get models from Bifrost Gateway
+ */
+export async function getBifrostModels(
+  options: {
+    bifrostBaseUrl?: string
+    bifrostApiKey?: string
+    timeout?: number
+    signal?: AbortSignal
+  } = {}
+): Promise<Response> {
+  const bifrostBaseUrl = options.bifrostBaseUrl || process.env.BIFROST_BASE_URL
+
+  if (!bifrostBaseUrl) {
+    throw new Error('BIFROST_BASE_URL is not configured')
+  }
+
+  // Try common Bifrost model endpoints
+  const possibleUrls = [
+    `${bifrostBaseUrl}/openai/v1/models`,
+    `${bifrostBaseUrl}/anthropic/v1/models`,
+    `${bifrostBaseUrl}/v1/models`
+  ]
+
+  let lastError: Error | null = null
+
+  for (const url of possibleUrls) {
+    try {
+      const headers: Record<string, string> = {}
+
+      // Add Bifrost API key if provided
+      const bifrostApiKey = options.bifrostApiKey || process.env.BIFROST_INTERNAL_KEY
+      if (bifrostApiKey) {
+        if (url.includes('/openai/')) {
+          headers['authorization'] = `Bearer ${bifrostApiKey}`
+        } else if (url.includes('/anthropic/')) {
+          headers['x-api-key'] = bifrostApiKey
+          headers['anthropic-version'] = '2023-06-01'
+        }
+      }
+
+      const response = await upstreamFetch(url, {
+        method: 'GET',
+        headers,
+        signal: options.signal,
+        ...(options.timeout && {
+          signal: AbortSignal.timeout(options.timeout)
+        })
+      })
+
+      if (response.status === 200) {
+        return response
+      }
+    } catch (error) {
+      lastError = error as Error
+      continue
+    }
+  }
+
+  if (lastError) {
+    throw lastError
+  }
+
+  throw new Error('All model endpoints failed')
+}
+
+/**
  * Pre-warm Bifrost connection on server startup
  * This should be called from a server initialization script
  */
