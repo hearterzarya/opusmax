@@ -20,9 +20,9 @@
     "cli:build": "pnpm --filter opusmaxx build",
     "cli:link": "pnpm --filter opusmaxx link --global",
     "cli:publish": "pnpm --filter opusmaxx publish --access public",
-    "cf:build": "WRANGLER_BUILD_CONDITIONS= WRANGLER_BUILD_PLATFORM=node opennextjs-cloudflare build",
-    "cf:preview": "WRANGLER_BUILD_CONDITIONS= WRANGLER_BUILD_PLATFORM=node opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "cf:deploy": "WRANGLER_BUILD_CONDITIONS= WRANGLER_BUILD_PLATFORM=node opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "cf:build": "prisma generate && WRANGLER_BUILD_CONDITIONS= WRANGLER_BUILD_PLATFORM=node opennextjs-cloudflare build",
+    "cf:preview": "prisma generate && WRANGLER_BUILD_CONDITIONS= WRANGLER_BUILD_PLATFORM=node opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "cf:deploy": "prisma generate && WRANGLER_BUILD_CONDITIONS= WRANGLER_BUILD_PLATFORM=node opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "cf:upload": "WRANGLER_BUILD_CONDITIONS= WRANGLER_BUILD_PLATFORM=node opennextjs-cloudflare build && opennextjs-cloudflare upload",
     "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
