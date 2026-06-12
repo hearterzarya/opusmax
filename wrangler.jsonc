@@ -1,4 +1,4 @@
-// Optional Cloudflare Workers deploy — Vercel/Railway ignore this file.
+﻿// Optional Cloudflare Workers deploy - Vercel/Railway ignore this file.
 // Remove this file to go back to Railway + Vercel only (see docs/CLOUDFLARE.md).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
@@ -6,6 +6,7 @@
   "main": ".open-next/worker.js",
   "compatibility_date": "2024-12-30",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
@@ -17,8 +18,8 @@
     }
   ],
   "vars": {
-    "OPUSX_RUNTIME": "cloudflare"
+    "OPUSX_RUNTIME": "cloudflare",
+    "UPSTREAM_ANTHROPIC_BASE_URL": "https://api.opusmax.pro",
+    "NEXT_PUBLIC_APP_URL": "https://opusmaxx.hearterzarya.workers.dev"
   }
-  // Optional Hyperdrive (alternative to Neon HTTP driver):
-  // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "YOUR_HYPERDRIVE_ID" }]
 }
