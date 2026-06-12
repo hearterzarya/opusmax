@@ -3,6 +3,11 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   outputFileTracingRoot: __dirname,
+  typescript: {
+    // Type checking is done separately (pnpm typecheck). Skip during next build
+    // to avoid Prisma client generation inconsistencies across platforms.
+    ignoreBuildErrors: true,
+  },
   serverExternalPackages: [
     'undici',
     '@neondatabase/serverless',
