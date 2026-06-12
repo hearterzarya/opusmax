@@ -1,10 +1,10 @@
-﻿// Optional Cloudflare Workers deploy - Vercel/Railway ignore this file.
+// Optional Cloudflare Workers deploy - Vercel/Railway ignore this file.
 // Remove this file to go back to Railway + Vercel only (see docs/CLOUDFLARE.md).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "opusmaxx",
   "main": ".open-next/worker.js",
-  "compatibility_date": "2024-12-30",
+  "compatibility_date": "2025-09-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
   "assets": {
