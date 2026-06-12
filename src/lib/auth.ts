@@ -104,16 +104,12 @@ export async function loginAdmin(email: string, password: string): Promise<{ suc
   const envPassword = process.env.ADMIN_PASSWORD || ''
 
   const admin = await prisma.adminUser.findUnique({ where: { email: inputEmail } })
-  const hasAnyAdmin = Boolean(await prisma.adminUser.findFirst({ select: { id: true } }))
 
   // Env-based bootstrap/recovery path:
-  // Enabled in non-production, or in production when explicitly allowed.
-  // Additionally, allow first-admin bootstrap in production when DB has no admin yet.
-  const allowEnvBootstrap =
-    process.env.NODE_ENV !== 'production' ||
-    process.env.ALLOW_ENV_ADMIN_BOOTSTRAP === 'true' ||
-    !hasAnyAdmin
-  if (allowEnvBootstrap && envEmail && envPassword && inputEmail === envEmail && password === envPassword) {
+  // Always allow login via env credentials when ADMIN_EMAIL + ADMIN_PASSWORD are set.
+  // This is secure because the attacker would already need to know the env password.
+  // The upsert ensures the DB stays in sync with the env credentials.
+  if (envEmail && envPassword && inputEmail === envEmail && password === envPassword) {
     const passwordHash = await hashPassword(envPassword)
     const ensured = await prisma.adminUser.upsert({
       where: { email: envEmail },

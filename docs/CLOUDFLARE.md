@@ -86,17 +86,45 @@ pnpm cf:deploy
 
 > **Windows:** `pnpm cf:build` may fail with `EPERM` symlink errors. Use WSL, GitHub-connected Cloudflare builds (Linux), or enable Developer Mode / run terminal as Administrator. Railway/Vercel `pnpm build` is unaffected.
 
-### 5. Deploy (GitHub → Cloudflare)
+### 5. Deploy (GitHub → Cloudflare Workers Builds)
 
-Cloudflare dashboard → Workers → Connect repository:
+Cloudflare dashboard → Workers & Pages → opusmax-gateway → Settings → Builds:
 
 | Setting | Value |
 |---------|-------|
 | Root directory | `/` (repo root, **not** `packages/cli`) |
-| Build command | `pnpm install && pnpm cf:build` |
+| Build command | `pnpm install --frozen-lockfile && pnpm cf:deploy` |
+| Deploy command | _(leave empty — `cf:deploy` handles both build + deploy)_ |
+
+**Important:** Do NOT use `pnpm run build` as the build command — that runs `next build` (for Vercel), not the OpenNext Cloudflare build.
+
+If Cloudflare Workers Builds requires separate build/deploy steps:
+
+| Setting | Value |
+|---------|-------|
+| Build command | `pnpm install --frozen-lockfile && pnpm cf:build` |
 | Deploy command | `pnpm cf:deploy` |
 
-Do **not** use plain `wrangler deploy` alone — that causes the monorepo workspace error.
+**Environment variables** must be set in Cloudflare Workers → Settings → Variables & secrets (NOT in Build Variables, since these are runtime secrets):
+
+```
+DATABASE_URL=postgresql://...neon...
+UPSTASH_REDIS_REST_URL=https://YOUR-DB.upstash.io
+UPSTASH_REDIS_REST_TOKEN=YOUR_TOKEN
+ANTHROPIC_API_KEY=...
+UPSTREAM_ANTHROPIC_BASE_URL=https://api.opusmax.pro
+JWT_SECRET=...
+ADMIN_EMAIL=...
+ADMIN_PASSWORD=...
+```
+
+**Build variables** (needed at build time for static page generation — set in Builds → Build Variables):
+
+```
+DATABASE_URL=postgresql://...neon... (same as runtime)
+```
+
+Do **not** use plain `wrangler deploy` alone — that skips the OpenNext build step.
 
 ### 6. Hyperdrive (optional)
 
