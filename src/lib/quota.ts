@@ -179,6 +179,20 @@ export async function resetRollingWindowQuota(keyId: string, nowMs: number = Dat
   const rollingKey = `token_budget:${keyId}`
   await redis.zremrangebyscore(rollingKey, 0, nowMs)
   await redis.setex(`${RESET_MARKER_PREFIX}${keyId}`, RESET_MARKER_TTL_SECONDS, String(nowMs))
+
+  // For DB-based quota: delete usage logs in the current window so the quota resets immediately.
+  // This is the most reliable approach for serverless environments without persistent Redis.
+  const windowStart = new Date(nowMs - QUOTA_WINDOW_MS)
+  try {
+    await prisma.usageLog.deleteMany({
+      where: {
+        apiKeyId: keyId,
+        timestamp: { gte: windowStart },
+      },
+    })
+  } catch (err) {
+    console.error('Failed to clear usage logs for quota reset:', err)
+  }
 }
 
 /**
@@ -192,25 +206,21 @@ async function reserveQuotaViaDatabase(
   requestedTokens: number,
   nowMs: number
 ): Promise<ReserveQuotaResult> {
-  const windowStartMs = nowMs - QUOTA_WINDOW_MS
+  const windowStart = new Date(nowMs - QUOTA_WINDOW_MS)
 
-  // Check for admin reset marker (stored in Redis even with mock — survives within same process)
-  const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
-  const effectiveWindowStart = new Date(Math.max(windowStartMs, resetMarkerMs ?? 0))
-
-  // Query actual usage from the database within the rolling window
+  // Query actual usage from the database within the rolling 5-hour window
   const [agg, firstLog] = await Promise.all([
     prisma.usageLog.aggregate({
       where: {
         apiKeyId: keyId,
-        timestamp: { gte: effectiveWindowStart },
+        timestamp: { gte: windowStart },
       },
       _sum: { totalTokens: true },
     }),
     prisma.usageLog.findFirst({
       where: {
         apiKeyId: keyId,
-        timestamp: { gte: effectiveWindowStart },
+        timestamp: { gte: windowStart },
       },
       orderBy: { timestamp: 'asc' },
       select: { timestamp: true },
@@ -230,7 +240,7 @@ async function reserveQuotaViaDatabase(
     }
   }
 
-  // Allowed — no reservation needed in DB mode since actual usage is tracked via usageLog
+  // Allowed — actual usage is tracked via usageLog after the request completes
   const firstTs = firstLog ? firstLog.timestamp.getTime() : nowMs
   const resetAt = firstTs + QUOTA_WINDOW_MS
 
