@@ -181,6 +181,67 @@ export async function resetRollingWindowQuota(keyId: string, nowMs: number = Dat
   await redis.setex(`${RESET_MARKER_PREFIX}${keyId}`, RESET_MARKER_TTL_SECONDS, String(nowMs))
 }
 
+/**
+ * Database-backed quota enforcement for serverless environments without persistent Redis.
+ * Queries the usageLog table to calculate tokens used in the rolling 5-hour window.
+ * Slightly slower than Redis Lua script but reliable across cold starts.
+ */
+async function reserveQuotaViaDatabase(
+  keyId: string,
+  numericBudget: number,
+  requestedTokens: number,
+  nowMs: number
+): Promise<ReserveQuotaResult> {
+  const windowStartMs = nowMs - QUOTA_WINDOW_MS
+
+  // Check for admin reset marker (stored in Redis even with mock — survives within same process)
+  const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
+  const effectiveWindowStart = new Date(Math.max(windowStartMs, resetMarkerMs ?? 0))
+
+  // Query actual usage from the database within the rolling window
+  const [agg, firstLog] = await Promise.all([
+    prisma.usageLog.aggregate({
+      where: {
+        apiKeyId: keyId,
+        timestamp: { gte: effectiveWindowStart },
+      },
+      _sum: { totalTokens: true },
+    }),
+    prisma.usageLog.findFirst({
+      where: {
+        apiKeyId: keyId,
+        timestamp: { gte: effectiveWindowStart },
+      },
+      orderBy: { timestamp: 'asc' },
+      select: { timestamp: true },
+    }),
+  ])
+
+  const used = agg._sum.totalTokens ?? 0
+
+  if (used + requestedTokens > numericBudget) {
+    const firstTs = firstLog ? firstLog.timestamp.getTime() : nowMs
+    const resetAt = firstTs + QUOTA_WINDOW_MS
+    return {
+      allowed: false,
+      used: clampNonNegative(used),
+      remaining: clampNonNegative(numericBudget - used),
+      resetAt,
+    }
+  }
+
+  // Allowed — no reservation needed in DB mode since actual usage is tracked via usageLog
+  const firstTs = firstLog ? firstLog.timestamp.getTime() : nowMs
+  const resetAt = firstTs + QUOTA_WINDOW_MS
+
+  return {
+    allowed: true,
+    used: clampNonNegative(used + requestedTokens),
+    remaining: clampNonNegative(numericBudget - used - requestedTokens),
+    resetAt,
+  }
+}
+
 export async function reserveRollingWindowQuota(
   keyId: string,
   budget: bigint,
@@ -189,6 +250,13 @@ export async function reserveRollingWindowQuota(
 ): Promise<ReserveQuotaResult> {
   const normalizedRequest = Math.max(0, Math.floor(requestedTokens))
   const numericBudget = Number(budget)
+
+  // When no distributed Redis is available (e.g. Vercel without Upstash),
+  // use database-based quota enforcement via usageLog table.
+  if (!HAS_REAL_REDIS) {
+    return reserveQuotaViaDatabase(keyId, numericBudget, normalizedRequest, nowMs)
+  }
+
   const rollingKey = `token_budget:${keyId}`
   const resetKey = `${RESET_MARKER_PREFIX}${keyId}`
   const reservationMember = `${nowMs}:${normalizedRequest}`
@@ -270,6 +338,10 @@ export async function settleRollingWindowQuota(
   actualTokens: number,
   nowMs: number = Date.now()
 ): Promise<void> {
+  // In DB-mode (no distributed Redis), settlement is unnecessary since
+  // reserveQuotaViaDatabase reads actual usage from usageLog directly.
+  if (!HAS_REAL_REDIS) return
+
   const delta = Math.floor(actualTokens) - Math.floor(projectedTokens)
   if (delta === 0) return
 
