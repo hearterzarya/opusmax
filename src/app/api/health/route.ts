@@ -88,5 +88,6 @@ export async function GET() {
     status,
     services,
     timestamp: new Date().toISOString(),
+    version: 'v2-db-quota',
   })
 }
