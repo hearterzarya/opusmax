@@ -408,42 +408,49 @@ export async function getRollingWindowQuotaState(
   budget: bigint,
   nowMs: number = Date.now()
 ): Promise<{ used: number; remaining: number; resetAt: string | null; blocked: boolean }> {
-  const rollingKey = `token_budget:${keyId}`
-  const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
-  const slidingCut = nowMs - QUOTA_WINDOW_MS
-  const floorMs = Math.max(slidingCut, resetMarkerMs ?? 0)
-  await redis.zremrangebyscore(rollingKey, '-inf', floorMs - 1)
-  const redisEntries = await getRedisEntriesInWindow(rollingKey, floorMs, nowMs)
-
-  let used = 0
-  let firstTs: number | null = null
-
-  for (const entry of redisEntries) {
-    const parsed = parseTokenEntry(entry)
-    if (!parsed) continue
-    used += parsed.tokens
-    if (firstTs === null || parsed.ts < firstTs) firstTs = parsed.ts
-  }
-
-  if (redisEntries.length === 0) {
-    // Redis can be cleared in dev/restarts; DB remains source of truth fallback.
-    const since = new Date(floorMs)
-    const [agg, first] = await Promise.all([
-      prisma.usageLog.aggregate({
-        where: { apiKeyId: keyId, timestamp: { gte: since } },
-        _sum: { totalTokens: true },
-      }),
-      prisma.usageLog.findFirst({
-        where: { apiKeyId: keyId, timestamp: { gte: since } },
-        orderBy: { timestamp: 'asc' },
-        select: { timestamp: true },
-      }),
-    ])
-    used = agg._sum.totalTokens || 0
-    firstTs = first ? first.timestamp.getTime() : null
-  }
-
   const numericBudget = Number(budget)
+  const since = new Date(nowMs - QUOTA_WINDOW_MS)
+
+  // When we have real Redis, use it as primary source
+  if (HAS_REAL_REDIS) {
+    const rollingKey = `token_budget:${keyId}`
+    const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
+    const slidingCut = nowMs - QUOTA_WINDOW_MS
+    const floorMs = Math.max(slidingCut, resetMarkerMs ?? 0)
+    await redis.zremrangebyscore(rollingKey, '-inf', floorMs - 1)
+    const redisEntries = await getRedisEntriesInWindow(rollingKey, floorMs, nowMs)
+
+    if (redisEntries.length > 0) {
+      let used = 0
+      let firstTs: number | null = null
+      for (const entry of redisEntries) {
+        const parsed = parseTokenEntry(entry)
+        if (!parsed) continue
+        used += parsed.tokens
+        if (firstTs === null || parsed.ts < firstTs) firstTs = parsed.ts
+      }
+      const normalizedUsed = Math.min(clampNonNegative(used), numericBudget)
+      const remaining = clampNonNegative(numericBudget - normalizedUsed)
+      const resetAt = firstTs ? new Date(firstTs + QUOTA_WINDOW_MS).toISOString() : null
+      return { used: normalizedUsed, remaining, resetAt, blocked: normalizedUsed >= numericBudget }
+    }
+  }
+
+  // DB fallback — pure time-based window query
+  const [agg, first] = await Promise.all([
+    prisma.usageLog.aggregate({
+      where: { apiKeyId: keyId, timestamp: { gte: since } },
+      _sum: { totalTokens: true },
+    }),
+    prisma.usageLog.findFirst({
+      where: { apiKeyId: keyId, timestamp: { gte: since } },
+      orderBy: { timestamp: 'asc' },
+      select: { timestamp: true },
+    }),
+  ])
+
+  const used = agg._sum.totalTokens || 0
+  const firstTs = first ? first.timestamp.getTime() : null
   const normalizedUsed = Math.min(clampNonNegative(used), numericBudget)
   const remaining = clampNonNegative(numericBudget - normalizedUsed)
   const resetAt = firstTs ? new Date(firstTs + QUOTA_WINDOW_MS).toISOString() : null
@@ -477,9 +484,9 @@ export async function getRollingWindowUsageFromUsageLogs(
     return { used: 0, remaining: 0, resetAt: null, blocked: false, windowStartedAt: null }
   }
 
-  const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
-  const effectiveWindowStartMs = Math.max(nowMs - QUOTA_WINDOW_MS, resetMarkerMs ?? 0)
-  const since = new Date(effectiveWindowStartMs)
+  // Pure time-based window: always use (now - 5 hours) as window start.
+  // No Redis marker dependency — works reliably on serverless.
+  const since = new Date(nowMs - QUOTA_WINDOW_MS)
 
   const [agg, first] = await Promise.all([
     prisma.usageLog.aggregate({
