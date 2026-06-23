@@ -3,143 +3,24 @@ import { redis, shouldUseDistributedRedis } from '@/lib/redis'
 
 export const QUOTA_WINDOW_SECONDS = 5 * 60 * 60
 const QUOTA_WINDOW_MS = QUOTA_WINDOW_SECONDS * 1000
-/** Keep reset marker long enough for DB/UI alignment; rolling enforcement reads it on every request. */
+/** Kept for compatibility with any external imports / Redis remnant cleanup. */
 export const RESET_MARKER_TTL_SECONDS = 30 * 24 * 60 * 60
-const HAS_REAL_REDIS = shouldUseDistributedRedis()
 const RESET_MARKER_PREFIX = 'token_budget_reset:'
 
-type ReserveQuotaResult = {
+export type ReserveQuotaResult = {
   allowed: boolean
   used: number
   remaining: number
+  /** Absolute reset timestamp in epoch ms. FIXED for the lifetime of a window. */
   resetAt: number
 }
 
-const RESERVE_QUOTA_LUA = `
-local rolling = KEYS[1]
-local reset_key = KEYS[2]
-local now = tonumber(ARGV[1])
-local window_ms = tonumber(ARGV[2])
-local budget = tonumber(ARGV[3])
-local requested = tonumber(ARGV[4])
-local member = ARGV[5]
-local ttl_seconds = tonumber(ARGV[6])
-
-local marker_raw = redis.call('GET', reset_key)
-local marker_ms = 0
-if marker_raw then marker_ms = tonumber(marker_raw) or 0 end
-local sliding_cut = now - window_ms
-local floor_ms = sliding_cut
-if marker_ms > sliding_cut then floor_ms = marker_ms end
-redis.call('ZREMRANGEBYSCORE', rolling, '-inf', floor_ms - 1)
-
-local entries = redis.call('ZRANGE', rolling, 0, -1)
-local used = 0
-for _, entry in ipairs(entries) do
-  local sep = string.find(entry, ':')
-  if sep then
-    local token_str = string.sub(entry, sep + 1)
-    local token_val = tonumber(token_str)
-    if token_val then
-      used = used + token_val
-    end
-  end
-end
-
-if used + requested > budget then
-  local first = redis.call('ZRANGE', rolling, 0, 0)[1]
-  local reset_at = now + window_ms
-  if first then
-    local sep = string.find(first, ':')
-    if sep then
-      local ts = tonumber(string.sub(first, 1, sep - 1))
-      if ts then
-        reset_at = ts + window_ms
-      end
-    end
-  end
-  local remaining = budget - used
-  if remaining < 0 then remaining = 0 end
-  return {0, used, remaining, reset_at}
-end
-
-redis.call('ZADD', rolling, now, member)
-redis.call('EXPIRE', rolling, ttl_seconds)
-
-local new_used = used + requested
-local first_after = redis.call('ZRANGE', rolling, 0, 0)[1]
-local reset_at = now + window_ms
-if first_after then
-  local sep = string.find(first_after, ':')
-  if sep then
-    local ts = tonumber(string.sub(first_after, 1, sep - 1))
-    if ts then
-      reset_at = ts + window_ms
-    end
-  end
-end
-local remaining = budget - new_used
-if remaining < 0 then remaining = 0 end
-return {1, new_used, remaining, reset_at}
-`
-
-const SETTLE_QUOTA_LUA = `
-local rolling = KEYS[1]
-local reset_key = KEYS[2]
-local now = tonumber(ARGV[1])
-local window_ms = tonumber(ARGV[2])
-local budget = tonumber(ARGV[3])
-local delta = tonumber(ARGV[4])
-local ttl_seconds = tonumber(ARGV[5])
-
-local marker_raw = redis.call('GET', reset_key)
-local marker_ms = 0
-if marker_raw then marker_ms = tonumber(marker_raw) or 0 end
-local sliding_cut = now - window_ms
-local floor_ms = sliding_cut
-if marker_ms > sliding_cut then floor_ms = marker_ms end
-redis.call('ZREMRANGEBYSCORE', rolling, '-inf', floor_ms - 1)
-
-if delta == 0 then
-  return 0
-end
-
-local entries = redis.call('ZRANGE', rolling, 0, -1)
-local used = 0
-for _, entry in ipairs(entries) do
-  local sep = string.find(entry, ':')
-  if sep then
-    local token_str = string.sub(entry, sep + 1)
-    local token_val = tonumber(token_str)
-    if token_val then
-      used = used + token_val
-    end
-  end
-end
-
-local applied_delta = delta
-if delta > 0 then
-  local headroom = budget - used
-  if headroom < 0 then headroom = 0 end
-  if delta > headroom then
-    applied_delta = headroom
-  end
-end
-
-if applied_delta ~= 0 then
-  redis.call('ZADD', rolling, now, tostring(now) .. ':' .. tostring(applied_delta))
-  redis.call('EXPIRE', rolling, ttl_seconds)
-end
-
-return applied_delta
-`
-
-function parseTokenEntry(entry: string): { ts: number; tokens: number } | null {
-  const [tsRaw, tokenRaw] = entry.split(':')
-  const ts = Number(tsRaw)
-  const tokens = Number(tokenRaw)
-  if (!Number.isFinite(ts) || !Number.isFinite(tokens)) return null
-  return { ts, tokens }
+export type QuotaWindowState = {
+  used: number
+  remaining: number
+  resetAt: string | null
+  blocked: boolean
+  windowStartedAt: string | null
 }
 
 function clampNonNegative(n: number): number {
@@ -147,111 +28,121 @@ function clampNonNegative(n: number): number {
   return Math.max(0, n)
 }
 
-async function getRedisEntriesInWindow(
-  rollingKey: string,
-  minScoreInclusive: number,
-  maxScoreInclusive: number
-): Promise<string[]> {
-  const client = redis as unknown as {
-    zrangebyscore?: (key: string, min: number | string, max: number | string) => Promise<string[]>
-  }
-  if (typeof client.zrangebyscore === 'function') {
-    return client.zrangebyscore(rollingKey, minScoreInclusive, maxScoreInclusive)
-  }
+// ---------------------------------------------------------------------------
+// Pure, side-effect-free helpers (unit tested in quota.test.ts)
+// ---------------------------------------------------------------------------
 
-  // Backward-compat fallback for long-lived dev processes with stale redis singleton shape.
-  const all = await redis.zrange(rollingKey, 0, -1)
-  return all.filter((entry) => {
-    const parsed = parseTokenEntry(entry)
-    if (!parsed) return false
-    return parsed.ts >= minScoreInclusive && parsed.ts <= maxScoreInclusive
-  })
+/**
+ * Given a fixed window anchor, compute its absolute reset timestamp and whether
+ * it has expired at `nowMs`. resetAt is ALWAYS windowStartMs + 5h — it is never
+ * derived from "now + remaining", which is what caused the extending-countdown
+ * bug.
+ */
+export function computeWindowBoundaries(
+  windowStartMs: number,
+  nowMs: number
+): { resetAtMs: number; expired: boolean } {
+  const resetAtMs = windowStartMs + QUOTA_WINDOW_MS
+  return { resetAtMs, expired: nowMs >= resetAtMs }
 }
 
-async function getQuotaResetMarkerMs(keyId: string): Promise<number | null> {
-  const raw = await redis.get(`${RESET_MARKER_PREFIX}${keyId}`)
-  if (!raw) return null
-  const ts = Number(raw)
-  return Number.isFinite(ts) ? ts : null
+/** Decide whether a request fits the remaining budget for the current window. */
+export function decideReservation(
+  usedBefore: number,
+  requestedTokens: number,
+  budget: number
+): { allowed: boolean; usedAfter: number; remaining: number } {
+  const req = Math.max(0, Math.floor(requestedTokens))
+  const allowed = usedBefore + req <= budget
+  const usedAfter = allowed ? usedBefore + req : usedBefore
+  return { allowed, usedAfter, remaining: clampNonNegative(budget - usedAfter) }
 }
 
-export async function resetRollingWindowQuota(keyId: string, nowMs: number = Date.now()): Promise<void> {
-  const rollingKey = `token_budget:${keyId}`
-  await redis.zremrangebyscore(rollingKey, 0, nowMs)
-  await redis.setex(`${RESET_MARKER_PREFIX}${keyId}`, RESET_MARKER_TTL_SECONDS, String(nowMs))
+// ---------------------------------------------------------------------------
+// Fixed 5-hour window — single source of truth lives in api_keys.quotaWindowStartAt
+//
+// The window is [windowStartAt, windowStartAt + 5h]. resetAt is computed ONCE
+// from windowStartAt and never recalculated from "now + remaining". When the
+// window expires, the next request opens a brand-new window anchored at that
+// moment. This removes the sliding-window bug where resetAt kept extending by
+// 5/10/15 minutes as old usage-log rows aged out of a rolling lookback.
+// ---------------------------------------------------------------------------
 
-  // For DB-based quota: delete usage logs in the current window so the quota resets immediately.
-  // This is the most reliable approach for serverless environments without persistent Redis.
-  const windowStart = new Date(nowMs - QUOTA_WINDOW_MS)
-  try {
-    await prisma.usageLog.deleteMany({
-      where: {
-        apiKeyId: keyId,
-        timestamp: { gte: windowStart },
-      },
-    })
-  } catch (err) {
-    console.error('Failed to clear usage logs for quota reset:', err)
-  }
+type FixedWindow = {
+  windowStartMs: number
+  resetAtMs: number
+  didReset: boolean
 }
 
 /**
- * Database-backed quota enforcement for serverless environments without persistent Redis.
- * Queries the usageLog table to calculate tokens used in the rolling 5-hour window.
- * Slightly slower than Redis Lua script but reliable across cold starts.
+ * Atomically resolve (and if needed roll) the fixed window for a key.
+ *
+ * The conditional UPDATE only matches when the stored window is missing or has
+ * already expired. Postgres takes a row lock for the UPDATE, so when several
+ * requests arrive at the same instant after expiry they serialize: the first
+ * opens the new window, the rest re-evaluate the WHERE against the freshly
+ * committed value, match zero rows, and read the same window. The window is
+ * therefore reset exactly once per expiry — no double reset, works across
+ * multiple serverless instances because the state is in the database.
  */
-async function reserveQuotaViaDatabase(
-  keyId: string,
-  numericBudget: number,
-  requestedTokens: number,
-  nowMs: number
-): Promise<ReserveQuotaResult> {
-  const windowStart = new Date(nowMs - QUOTA_WINDOW_MS)
+async function resolveFixedWindow(keyId: string, nowMs: number): Promise<FixedWindow> {
+  const nowDate = new Date(nowMs)
+  const expiryThreshold = new Date(nowMs - QUOTA_WINDOW_MS)
 
-  // Query actual usage from the database within the rolling 5-hour window
-  const [agg, firstLog] = await Promise.all([
-    prisma.usageLog.aggregate({
-      where: {
-        apiKeyId: keyId,
-        timestamp: { gte: windowStart },
-      },
-      _sum: { totalTokens: true },
-    }),
-    prisma.usageLog.findFirst({
-      where: {
-        apiKeyId: keyId,
-        timestamp: { gte: windowStart },
-      },
-      orderBy: { timestamp: 'asc' },
-      select: { timestamp: true },
-    }),
-  ])
+  const rolled = await prisma.$queryRaw<Array<{ quotaWindowStartAt: Date }>>`
+    UPDATE "api_keys"
+    SET "quotaWindowStartAt" = ${nowDate}
+    WHERE "id" = ${keyId}
+      AND ("quotaWindowStartAt" IS NULL OR "quotaWindowStartAt" <= ${expiryThreshold})
+    RETURNING "quotaWindowStartAt"
+  `
 
-  const used = agg._sum.totalTokens ?? 0
-
-  if (used + requestedTokens > numericBudget) {
-    const firstTs = firstLog ? firstLog.timestamp.getTime() : nowMs
-    const resetAt = firstTs + QUOTA_WINDOW_MS
-    return {
-      allowed: false,
-      used: clampNonNegative(used),
-      remaining: clampNonNegative(numericBudget - used),
-      resetAt,
-    }
+  if (rolled.length > 0) {
+    return { windowStartMs: nowMs, resetAtMs: nowMs + QUOTA_WINDOW_MS, didReset: true }
   }
 
-  // Allowed — actual usage is tracked via usageLog after the request completes
-  const firstTs = firstLog ? firstLog.timestamp.getTime() : nowMs
-  const resetAt = firstTs + QUOTA_WINDOW_MS
-
-  return {
-    allowed: true,
-    used: clampNonNegative(used + requestedTokens),
-    remaining: clampNonNegative(numericBudget - used - requestedTokens),
-    resetAt,
-  }
+  const row = await prisma.apiKey.findUnique({
+    where: { id: keyId },
+    select: { quotaWindowStartAt: true },
+  })
+  const windowStartMs = row?.quotaWindowStartAt ? row.quotaWindowStartAt.getTime() : nowMs
+  return { windowStartMs, resetAtMs: windowStartMs + QUOTA_WINDOW_MS, didReset: false }
 }
 
+/**
+ * Read-only window view for status endpoints. Never mutates.
+ * An expired window is reported as inactive (fresh) so the UI shows a clean
+ * "awaiting first request" state until the next real request opens a window.
+ */
+async function readFixedWindow(
+  keyId: string,
+  nowMs: number
+): Promise<{ windowStartMs: number | null; resetAtMs: number | null }> {
+  const row = await prisma.apiKey.findUnique({
+    where: { id: keyId },
+    select: { quotaWindowStartAt: true },
+  })
+  if (!row?.quotaWindowStartAt) return { windowStartMs: null, resetAtMs: null }
+
+  const windowStartMs = row.quotaWindowStartAt.getTime()
+  const resetAtMs = windowStartMs + QUOTA_WINDOW_MS
+  if (nowMs >= resetAtMs) return { windowStartMs: null, resetAtMs: null }
+  return { windowStartMs, resetAtMs }
+}
+
+/** Sum of completed-request tokens since the window opened. */
+async function sumTokensSince(keyId: string, sinceMs: number): Promise<number> {
+  const agg = await prisma.usageLog.aggregate({
+    where: { apiKeyId: keyId, timestamp: { gte: new Date(sinceMs) } },
+    _sum: { totalTokens: true },
+  })
+  return agg._sum.totalTokens ?? 0
+}
+
+/**
+ * Enforce the fixed 5-hour token budget for a key and return the decision.
+ * Called before forwarding a request upstream.
+ */
 export async function reserveRollingWindowQuota(
   keyId: string,
   budget: bigint,
@@ -261,251 +152,133 @@ export async function reserveRollingWindowQuota(
   const normalizedRequest = Math.max(0, Math.floor(requestedTokens))
   const numericBudget = Number(budget)
 
-  // When no distributed Redis is available (e.g. Vercel without Upstash),
-  // use database-based quota enforcement via usageLog table.
-  if (!HAS_REAL_REDIS) {
-    return reserveQuotaViaDatabase(keyId, numericBudget, normalizedRequest, nowMs)
+  const win = await resolveFixedWindow(keyId, nowMs)
+  const usedBefore = win.didReset ? 0 : await sumTokensSince(keyId, win.windowStartMs)
+
+  const allowed = usedBefore + normalizedRequest <= numericBudget
+  const usedAfter = allowed ? usedBefore + normalizedRequest : usedBefore
+  const remaining = clampNonNegative(numericBudget - usedAfter)
+
+  console.log(
+    '[QUOTA] reserve ' +
+      JSON.stringify({
+        keyId,
+        now: new Date(nowMs).toISOString(),
+        windowStartAt: new Date(win.windowStartMs).toISOString(),
+        resetAt: new Date(win.resetAtMs).toISOString(),
+        usedBeforeReset: usedBefore,
+        resetTriggered: win.didReset,
+        requested: normalizedRequest,
+        allowed,
+        remaining,
+      })
+  )
+
+  return {
+    allowed,
+    used: clampNonNegative(usedAfter),
+    remaining,
+    resetAt: win.resetAtMs,
   }
-
-  const rollingKey = `token_budget:${keyId}`
-  const resetKey = `${RESET_MARKER_PREFIX}${keyId}`
-  const reservationMember = `${nowMs}:${normalizedRequest}`
-  const ttlSeconds = QUOTA_WINDOW_SECONDS
-
-  const client = redis as unknown as {
-    eval?: (
-      script: string,
-      numKeys: number,
-      ...args: Array<string | number>
-    ) => Promise<unknown>
-  }
-  const raw =
-    typeof client.eval === 'function'
-      ? await client.eval(
-          RESERVE_QUOTA_LUA,
-          2,
-          rollingKey,
-          resetKey,
-          nowMs,
-          QUOTA_WINDOW_MS,
-          numericBudget,
-          normalizedRequest,
-          reservationMember,
-          ttlSeconds
-        )
-      : null
-
-  if (!raw) {
-    // Fallback for stale dev singleton lacking eval; not strictly atomic.
-    const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
-    const slidingCut = nowMs - QUOTA_WINDOW_MS
-    const floorMs = Math.max(slidingCut, resetMarkerMs ?? 0)
-    await redis.zremrangebyscore(rollingKey, '-inf', floorMs - 1)
-    const entries = await getRedisEntriesInWindow(rollingKey, floorMs, nowMs)
-    let usedFallback = 0
-    for (const entry of entries) {
-      const parsed = parseTokenEntry(entry)
-      if (parsed) usedFallback += parsed.tokens
-    }
-    if (usedFallback + normalizedRequest > numericBudget) {
-      const first = entries[0]
-      const firstTs = Number(first?.split(':')[0] ?? nowMs)
-      const resetAt = Number.isFinite(firstTs) ? firstTs + QUOTA_WINDOW_MS : nowMs + QUOTA_WINDOW_MS
-      return {
-        allowed: false,
-        used: clampNonNegative(usedFallback),
-        remaining: clampNonNegative(numericBudget - usedFallback),
-        resetAt,
-      }
-    }
-    await redis.zadd(rollingKey, nowMs, reservationMember)
-    await redis.expire(rollingKey, ttlSeconds)
-    const updatedUsed = usedFallback + normalizedRequest
-    const firstAfter = (await redis.zrange(rollingKey, 0, 0))[0]
-    const firstAfterTs = Number(firstAfter?.split(':')[0] ?? nowMs)
-    const resetAt = Number.isFinite(firstAfterTs) ? firstAfterTs + QUOTA_WINDOW_MS : nowMs + QUOTA_WINDOW_MS
-    return {
-      allowed: true,
-      used: clampNonNegative(updatedUsed),
-      remaining: clampNonNegative(numericBudget - updatedUsed),
-      resetAt,
-    }
-  }
-
-  const arr = Array.isArray(raw) ? raw : []
-  const allowed = Number(arr[0] ?? 0) === 1
-  const used = clampNonNegative(Number(arr[1] ?? 0))
-  const remaining = clampNonNegative(Number(arr[2] ?? 0))
-  const resetAt = Number(arr[3] ?? nowMs + QUOTA_WINDOW_MS)
-
-  return { allowed, used, remaining, resetAt }
 }
 
+/**
+ * No-op in the fixed-window model.
+ *
+ * Actual token consumption is recorded in usage_logs after each completed
+ * request, and reserveRollingWindowQuota reads those rows directly. There is no
+ * separate reservation ledger to reconcile, so projected-vs-actual settlement
+ * is unnecessary. Kept for call-site compatibility.
+ */
 export async function settleRollingWindowQuota(
-  keyId: string,
-  budget: bigint,
-  projectedTokens: number,
-  actualTokens: number,
-  nowMs: number = Date.now()
+  _keyId: string,
+  _budget: bigint,
+  _projectedTokens: number,
+  _actualTokens: number,
+  _nowMs: number = Date.now()
 ): Promise<void> {
-  // In DB-mode (no distributed Redis), settlement is unnecessary since
-  // reserveQuotaViaDatabase reads actual usage from usageLog directly.
-  if (!HAS_REAL_REDIS) return
-
-  const delta = Math.floor(actualTokens) - Math.floor(projectedTokens)
-  if (delta === 0) return
-
-  const rollingKey = `token_budget:${keyId}`
-  const resetKey = `${RESET_MARKER_PREFIX}${keyId}`
-  const numericBudget = Number(budget)
-  const client = redis as unknown as {
-    eval?: (
-      script: string,
-      numKeys: number,
-      ...args: Array<string | number>
-    ) => Promise<unknown>
-  }
-  if (HAS_REAL_REDIS && typeof client.eval === 'function') {
-    await client.eval(
-      SETTLE_QUOTA_LUA,
-      2,
-      rollingKey,
-      resetKey,
-      nowMs,
-      QUOTA_WINDOW_MS,
-      numericBudget,
-      delta,
-      QUOTA_WINDOW_SECONDS
-    )
-    return
-  }
-
-  // Fallback for stale dev process shape (non-atomic).
-  const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
-  const slidingCut = nowMs - QUOTA_WINDOW_MS
-  const floorMs = Math.max(slidingCut, resetMarkerMs ?? 0)
-  await redis.zremrangebyscore(rollingKey, '-inf', floorMs - 1)
-  const entries = await getRedisEntriesInWindow(rollingKey, floorMs, nowMs)
-  let used = 0
-  for (const entry of entries) {
-    const parsed = parseTokenEntry(entry)
-    if (parsed) used += parsed.tokens
-  }
-
-  let appliedDelta = delta
-  if (delta > 0) {
-    const headroom = Math.max(0, numericBudget - used)
-    appliedDelta = Math.min(delta, headroom)
-  }
-  if (appliedDelta !== 0) {
-    await redis.zadd(rollingKey, nowMs, `${nowMs}:${appliedDelta}`)
-    await redis.expire(rollingKey, QUOTA_WINDOW_SECONDS)
-  }
+  return
 }
 
+/**
+ * Admin action: open a fresh window starting now. Because used tokens are
+ * counted as usage_logs since windowStartAt, moving the anchor to "now"
+ * instantly zeroes the used count while preserving historical logs.
+ */
+export async function resetRollingWindowQuota(keyId: string, nowMs: number = Date.now()): Promise<void> {
+  await prisma.apiKey.update({
+    where: { id: keyId },
+    data: { quotaWindowStartAt: new Date(nowMs) },
+  })
+
+  // Clear any Redis remnants if a distributed Redis is configured.
+  if (shouldUseDistributedRedis()) {
+    try {
+      await redis.zremrangebyscore(`token_budget:${keyId}`, 0, nowMs)
+      await redis.setex(`${RESET_MARKER_PREFIX}${keyId}`, RESET_MARKER_TTL_SECONDS, String(nowMs))
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+
+  console.log(
+    '[QUOTA] manual reset ' +
+      JSON.stringify({
+        keyId,
+        newWindowStartAt: new Date(nowMs).toISOString(),
+        newResetAt: new Date(nowMs + QUOTA_WINDOW_MS).toISOString(),
+      })
+  )
+}
+
+/**
+ * Quota snapshot for internal checks (key-check). Read-only.
+ */
 export async function getRollingWindowQuotaState(
   keyId: string,
   budget: bigint,
   nowMs: number = Date.now()
 ): Promise<{ used: number; remaining: number; resetAt: string | null; blocked: boolean }> {
   const numericBudget = Number(budget)
-  const since = new Date(nowMs - QUOTA_WINDOW_MS)
+  const { windowStartMs, resetAtMs } = await readFixedWindow(keyId, nowMs)
+  const used = windowStartMs === null ? 0 : await sumTokensSince(keyId, windowStartMs)
 
-  // When we have real Redis, use it as primary source
-  if (HAS_REAL_REDIS) {
-    const rollingKey = `token_budget:${keyId}`
-    const resetMarkerMs = await getQuotaResetMarkerMs(keyId)
-    const slidingCut = nowMs - QUOTA_WINDOW_MS
-    const floorMs = Math.max(slidingCut, resetMarkerMs ?? 0)
-    await redis.zremrangebyscore(rollingKey, '-inf', floorMs - 1)
-    const redisEntries = await getRedisEntriesInWindow(rollingKey, floorMs, nowMs)
-
-    if (redisEntries.length > 0) {
-      let used = 0
-      let firstTs: number | null = null
-      for (const entry of redisEntries) {
-        const parsed = parseTokenEntry(entry)
-        if (!parsed) continue
-        used += parsed.tokens
-        if (firstTs === null || parsed.ts < firstTs) firstTs = parsed.ts
-      }
-      const normalizedUsed = Math.min(clampNonNegative(used), numericBudget)
-      const remaining = clampNonNegative(numericBudget - normalizedUsed)
-      const resetAt = firstTs ? new Date(firstTs + QUOTA_WINDOW_MS).toISOString() : null
-      return { used: normalizedUsed, remaining, resetAt, blocked: normalizedUsed >= numericBudget }
-    }
-  }
-
-  // DB fallback — pure time-based window query
-  const [agg, first] = await Promise.all([
-    prisma.usageLog.aggregate({
-      where: { apiKeyId: keyId, timestamp: { gte: since } },
-      _sum: { totalTokens: true },
-    }),
-    prisma.usageLog.findFirst({
-      where: { apiKeyId: keyId, timestamp: { gte: since } },
-      orderBy: { timestamp: 'asc' },
-      select: { timestamp: true },
-    }),
-  ])
-
-  const used = agg._sum.totalTokens || 0
-  const firstTs = first ? first.timestamp.getTime() : null
   const normalizedUsed = Math.min(clampNonNegative(used), numericBudget)
   const remaining = clampNonNegative(numericBudget - normalizedUsed)
-  const resetAt = firstTs ? new Date(firstTs + QUOTA_WINDOW_MS).toISOString() : null
 
   return {
     used: normalizedUsed,
     remaining,
-    resetAt,
+    resetAt: resetAtMs ? new Date(resetAtMs).toISOString() : null,
     blocked: normalizedUsed >= numericBudget,
   }
 }
 
 /**
- * Dashboard-friendly rolling window totals from `usage_logs` (completed requests only).
- * Uses the same effective window start as quota enforcement (5h from now, or last admin reset).
- * Avoids Redis reservation/settle jitter in the public key-status UI.
+ * Dashboard-friendly window snapshot for the public key-status UI. Read-only.
+ * Uses the fixed window anchor — resetAt is stable for the whole window.
  */
 export async function getRollingWindowUsageFromUsageLogs(
   keyId: string,
   budget: bigint,
   nowMs: number = Date.now()
-): Promise<{
-  used: number
-  remaining: number
-  resetAt: string | null
-  blocked: boolean
-  windowStartedAt: string | null
-}> {
+): Promise<QuotaWindowState> {
   const numericBudget = Number(budget)
   if (!Number.isFinite(numericBudget) || numericBudget <= 0) {
     return { used: 0, remaining: 0, resetAt: null, blocked: false, windowStartedAt: null }
   }
 
-  // Pure time-based window: always use (now - 5 hours) as window start.
-  // No Redis marker dependency — works reliably on serverless.
-  const since = new Date(nowMs - QUOTA_WINDOW_MS)
+  const { windowStartMs, resetAtMs } = await readFixedWindow(keyId, nowMs)
+  const used = windowStartMs === null ? 0 : await sumTokensSince(keyId, windowStartMs)
 
-  const [agg, first] = await Promise.all([
-    prisma.usageLog.aggregate({
-      where: { apiKeyId: keyId, timestamp: { gte: since } },
-      _sum: { totalTokens: true },
-    }),
-    prisma.usageLog.findFirst({
-      where: { apiKeyId: keyId, timestamp: { gte: since } },
-      orderBy: { timestamp: 'asc' },
-      select: { timestamp: true },
-    }),
-  ])
+  const normalizedUsed = Math.min(clampNonNegative(used), numericBudget)
+  const remaining = clampNonNegative(numericBudget - normalizedUsed)
 
-  const rawUsed = agg._sum.totalTokens ?? 0
-  const used = Math.min(clampNonNegative(rawUsed), numericBudget)
-  const remaining = clampNonNegative(numericBudget - used)
-  const windowStartedAt = first ? first.timestamp.toISOString() : null
-  const resetAt = first ? new Date(first.timestamp.getTime() + QUOTA_WINDOW_MS).toISOString() : null
-  const blocked = used >= numericBudget
-
-  return { used, remaining, resetAt, blocked, windowStartedAt }
+  return {
+    used: normalizedUsed,
+    remaining,
+    resetAt: resetAtMs ? new Date(resetAtMs).toISOString() : null,
+    blocked: normalizedUsed >= numericBudget,
+    windowStartedAt: windowStartMs ? new Date(windowStartMs).toISOString() : null,
+  }
 }

@@ -57,9 +57,10 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const serverNowMs = Date.now()
     const quotaState =
       key.hourlyTokenBudget && key.hourlyTokenBudget > 0n
-        ? await getRollingWindowUsageFromUsageLogs(key.id, key.hourlyTokenBudget)
+        ? await getRollingWindowUsageFromUsageLogs(key.id, key.hourlyTokenBudget, serverNowMs)
         : {
             used: 0,
             remaining: 0,
@@ -67,6 +68,12 @@ export async function GET(request: NextRequest) {
             blocked: false,
             windowStartedAt: null,
           }
+
+    // Absolute, backend-owned timing. Frontend must display these as-is and
+    // never recompute the reset moment locally.
+    const resetAtMs = quotaState.resetAt ? new Date(quotaState.resetAt).getTime() : null
+    const timeRemainingMs = resetAtMs ? Math.max(0, resetAtMs - serverNowMs) : 0
+    const limitTokens = Number(key.hourlyTokenBudget) || 0
 
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
     const [requests24h, allTimeRequests, lastLog, recentActivity] = await Promise.all([
@@ -115,6 +122,15 @@ export async function GET(request: NextRequest) {
       hourlyRemaining: key.hourlyTokenBudget ? quotaState.remaining : null,
       windowStartedAt: quotaState.windowStartedAt,
       windowResetAt: quotaState.resetAt,
+      // Fixed-window quota fields (backend is the single source of truth).
+      limitTokens,
+      usedTokens: quotaState.used,
+      remainingTokens: quotaState.remaining,
+      windowStartAt: quotaState.windowStartedAt,
+      resetAt: quotaState.resetAt,
+      serverNow: new Date(serverNowMs).toISOString(),
+      timeRemainingMs,
+      isQuotaReset: quotaState.windowStartedAt === null,
       lastUsed: key.lastUsedAt?.toISOString() || lastLog?.timestamp.toISOString() || null,
       rpmLimit: key.rpmLimit,
       requests24h,

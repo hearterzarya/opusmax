@@ -72,6 +72,7 @@ model ApiKey {
   rpmLimit             Int           @default(60)
   hourlyTokenBudget    BigInt?
   monthlyTokenBudget   BigInt?
+  quotaWindowStartAt   DateTime?
   expiresAt            DateTime?
   lastUsedAt           DateTime?
   createdAt            DateTime      @default(now())

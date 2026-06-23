@@ -39,6 +39,11 @@ interface KeyStatus {
   hourlyRemaining?: number | null
   windowResetAt: string | null
   windowStartedAt?: string | null
+  // Fixed-window fields (backend is the single source of truth)
+  resetAt?: string | null
+  serverNow?: string | null
+  timeRemainingMs?: number | null
+  isQuotaReset?: boolean
   lastUsed: string | null
   rpmLimit: number | null
   requests24h?: number | null
@@ -119,6 +124,11 @@ export default function KeyStatusPage() {
   const [changedPulse, setChangedPulse] = useState(false)
   const inflightRef = useRef<AbortController | null>(null)
   const prevStatusRef = useRef<KeyStatus | null>(null)
+  // Offset between the server clock and this browser's clock (serverNow - clientNow).
+  // Used so the countdown tracks the backend's absolute resetAt, never a locally
+  // invented reset time. Prevents client/server time-mismatch drift.
+  const serverOffsetRef = useRef<number>(0)
+  const zeroRefetchedRef = useRef<boolean>(false)
 
   const checkKey = useCallback(async (opts?: { preserveStatus?: boolean }) => {
     if (!apiKey.trim()) {
@@ -153,6 +163,15 @@ export default function KeyStatusPage() {
       }
       const previous = prevStatusRef.current
       const next = data as KeyStatus
+      // Sync server clock offset so the countdown uses backend time, not local time.
+      if (typeof next.serverNow === 'string') {
+        const serverNowMs = new Date(next.serverNow).getTime()
+        if (Number.isFinite(serverNowMs)) {
+          serverOffsetRef.current = serverNowMs - Date.now()
+        }
+      }
+      // Allow a fresh single refetch when the next countdown reaches zero.
+      zeroRefetchedRef.current = false
       const changed =
         !previous ||
         previous.hourlyUsage !== next.hourlyUsage ||
@@ -207,12 +226,31 @@ export default function KeyStatusPage() {
   }, [])
 
   const windowCountdown = useMemo(() => {
-    if (!status?.windowResetAt) return null
-    const resetTs = new Date(status.windowResetAt).getTime()
+    // Prefer the fixed-window resetAt; fall back to legacy windowResetAt.
+    const resetSource = status?.resetAt ?? status?.windowResetAt
+    if (!resetSource) return null
+    const resetTs = new Date(resetSource).getTime()
     if (!Number.isFinite(resetTs)) return null
-    const diff = Math.max(0, resetTs - nowMs)
+    // Use server-synced clock so the countdown matches the backend exactly.
+    const serverNow = nowMs + serverOffsetRef.current
+    const diff = Math.max(0, resetTs - serverNow)
     return formatDuration(diff)
-  }, [status?.windowResetAt, nowMs])
+  }, [status?.resetAt, status?.windowResetAt, nowMs])
+
+  // When the countdown reaches zero, ask the backend for the refreshed state
+  // exactly once. The backend decides whether the window actually reset — the
+  // frontend never fabricates a new reset time.
+  useEffect(() => {
+    const resetSource = status?.resetAt ?? status?.windowResetAt
+    if (!resetSource || !apiKey.trim()) return
+    const resetTs = new Date(resetSource).getTime()
+    if (!Number.isFinite(resetTs)) return
+    const serverNow = nowMs + serverOffsetRef.current
+    if (serverNow >= resetTs && !zeroRefetchedRef.current) {
+      zeroRefetchedRef.current = true
+      checkKey({ preserveStatus: true })
+    }
+  }, [status?.resetAt, status?.windowResetAt, nowMs, apiKey, checkKey])
 
   const lastSeenAgo = useMemo(() => {
     if (!status?.lastUsed) return 'Never'

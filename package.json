@@ -24,7 +24,9 @@
     "cf:preview": "prisma generate && WRANGLER_BUILD_CONDITIONS= WRANGLER_BUILD_PLATFORM=node opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf:deploy": "prisma generate && WRANGLER_BUILD_CONDITIONS= WRANGLER_BUILD_PLATFORM=node opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "cf:upload": "WRANGLER_BUILD_CONDITIONS= WRANGLER_BUILD_PLATFORM=node opennextjs-cloudflare build && opennextjs-cloudflare upload",
-    "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
@@ -82,6 +84,7 @@
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
+    "vitest": "^4.1.9",
     "wrangler": "^4.98.0",
     "ws": "^8.21.0"
   }
