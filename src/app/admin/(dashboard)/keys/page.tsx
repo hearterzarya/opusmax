@@ -1,8 +1,13 @@
 import Link from 'next/link'
-import { Plus, Key, CheckCircle2, XCircle, AlertTriangle, Infinity as InfinityIcon, Layers } from 'lucide-react'
+import { Plus, Key, CheckCircle2, XCircle, AlertTriangle, Infinity as InfinityIcon, Layers, PauseCircle } from 'lucide-react'
 import { prisma } from '@/lib/prisma'
 import { getApiKeyStatus, detectPlan } from '@/lib/api-key-status'
 import { KeysTable, type SerializedKey } from './keys-table'
+
+// Always render fresh from the DB so expiry/extend/plan/disable changes show
+// immediately after router.refresh() — never serve a stale cached snapshot.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 async function getApiKeys() {
   try {
@@ -65,11 +70,12 @@ export default async function AdminKeysPage() {
       if (info.status === 'expired') acc.expired += 1
       if (info.status === 'expiring_soon') acc.expiringSoon += 1
       if (info.status === 'lifetime') acc.lifetime += 1
+      if (info.status === 'paused') acc.disabled += 1
       if (plan === '5X') acc.plan5x += 1
       if (plan === '20X') acc.plan20x += 1
       return acc
     },
-    { total: 0, active: 0, expired: 0, expiringSoon: 0, lifetime: 0, plan5x: 0, plan20x: 0 }
+    { total: 0, active: 0, expired: 0, expiringSoon: 0, lifetime: 0, disabled: 0, plan5x: 0, plan20x: 0 }
   )
 
   return (
@@ -85,12 +91,13 @@ export default async function AdminKeysPage() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
         <SummaryCard label="Total" value={summary.total} icon={Key} glow="bg-violet-500/20" />
         <SummaryCard label="Active" value={summary.active} icon={CheckCircle2} glow="bg-emerald-500/20" />
         <SummaryCard label="Expired" value={summary.expired} icon={XCircle} glow="bg-rose-500/20" />
         <SummaryCard label="Expiring Soon" value={summary.expiringSoon} icon={AlertTriangle} glow="bg-amber-500/20" />
         <SummaryCard label="Lifetime" value={summary.lifetime} icon={InfinityIcon} glow="bg-fuchsia-500/20" />
+        <SummaryCard label="Disabled" value={summary.disabled} icon={PauseCircle} glow="bg-white/10" />
         <SummaryCard label="5X Plans" value={summary.plan5x} icon={Layers} glow="bg-cyan-500/20" />
         <SummaryCard label="20X Plans" value={summary.plan20x} icon={Layers} glow="bg-sky-500/20" />
       </div>

@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     console.error('Login error:', error)
     return createErrorResponse(
       ErrorCodes.INTERNAL_ERROR,
-      `Internal server error: ${error instanceof Error ? error.message : String(error)}`,
+      'Internal server error',
       500
     )
   }
