@@ -2,12 +2,22 @@ import Link from 'next/link'
 import { Plus, Key, CheckCircle2, XCircle, AlertTriangle, Infinity as InfinityIcon, Layers, PauseCircle } from 'lucide-react'
 import { prisma } from '@/lib/prisma'
 import { getApiKeyStatus, detectPlan } from '@/lib/api-key-status'
-import { KeysTable, type SerializedKey } from './keys-table'
+import { KeysTable, type EnrichedKey } from './keys-table'
 
 // Always render fresh from the DB so expiry/extend/plan/disable changes show
 // immediately after router.refresh() — never serve a stale cached snapshot.
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** Deterministic UTC date label — identical on server and client (no tz drift). */
+function formatDateUTC(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+}
 
 async function getApiKeys() {
   try {
@@ -49,30 +59,41 @@ export default async function AdminKeysPage() {
   const apiKeys = await getApiKeys()
   const now = Date.now()
 
-  const serialized: SerializedKey[] = apiKeys.map((k) => ({
-    id: k.id,
-    name: k.name,
-    keyPrefix: k.keyPrefix,
-    keyFullLast4: k.keyFullLast4,
-    status: k.status,
-    expiresAt: k.expiresAt ? k.expiresAt.toISOString() : null,
-    createdAt: k.createdAt.toISOString(),
-    lastUsedAt: k.lastUsedAt ? k.lastUsedAt.toISOString() : null,
-    hourlyTokenBudget: k.hourlyTokenBudget != null ? k.hourlyTokenBudget.toString() : null,
-  }))
+  const enriched: EnrichedKey[] = apiKeys.map((k) => {
+    const expiresIso = k.expiresAt ? k.expiresAt.toISOString() : null
+    const budget = k.hourlyTokenBudget != null ? k.hourlyTokenBudget.toString() : null
+    const info = getApiKeyStatus(expiresIso, k.status, now)
+    const plan = detectPlan(k.hourlyTokenBudget ?? null)
+    return {
+      id: k.id,
+      name: k.name,
+      keyPrefix: k.keyPrefix,
+      keyFullLast4: k.keyFullLast4,
+      status: k.status,
+      expiresAt: expiresIso,
+      hourlyTokenBudget: budget,
+      statusValue: info.status,
+      statusLabel: info.label,
+      remainingLabel: info.remainingLabel,
+      remainingDays: info.remainingDays,
+      plan,
+      createdLabel: formatDateUTC(k.createdAt.toISOString()),
+      expiryLabel: expiresIso ? formatDateUTC(expiresIso) : 'Lifetime',
+      createdMs: k.createdAt.getTime(),
+      expiryMs: k.expiresAt ? k.expiresAt.getTime() : null,
+    }
+  })
 
-  const summary = serialized.reduce(
+  const summary = enriched.reduce(
     (acc, k) => {
-      const info = getApiKeyStatus(k.expiresAt, k.status, now)
-      const plan = detectPlan(k.hourlyTokenBudget ? BigInt(k.hourlyTokenBudget) : null)
       acc.total += 1
-      if (info.status === 'active') acc.active += 1
-      if (info.status === 'expired') acc.expired += 1
-      if (info.status === 'expiring_soon') acc.expiringSoon += 1
-      if (info.status === 'lifetime') acc.lifetime += 1
-      if (info.status === 'paused') acc.disabled += 1
-      if (plan === '5X') acc.plan5x += 1
-      if (plan === '20X') acc.plan20x += 1
+      if (k.statusValue === 'active') acc.active += 1
+      if (k.statusValue === 'expired') acc.expired += 1
+      if (k.statusValue === 'expiring_soon') acc.expiringSoon += 1
+      if (k.statusValue === 'lifetime') acc.lifetime += 1
+      if (k.statusValue === 'paused') acc.disabled += 1
+      if (k.plan === '5X') acc.plan5x += 1
+      if (k.plan === '20X') acc.plan20x += 1
       return acc
     },
     { total: 0, active: 0, expired: 0, expiringSoon: 0, lifetime: 0, disabled: 0, plan5x: 0, plan20x: 0 }
@@ -102,7 +123,7 @@ export default async function AdminKeysPage() {
         <SummaryCard label="20X Plans" value={summary.plan20x} icon={Layers} glow="bg-sky-500/20" />
       </div>
 
-      {serialized.length === 0 ? (
+      {enriched.length === 0 ? (
         <div className="grad-border glass rounded-2xl p-12 text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white/[0.04] ring-1 ring-white/10">
             <Key className="h-6 w-6 text-white/65" />
@@ -114,7 +135,7 @@ export default async function AdminKeysPage() {
           </Link>
         </div>
       ) : (
-        <KeysTable keys={serialized} />
+        <KeysTable keys={enriched} />
       )}
     </div>
   )

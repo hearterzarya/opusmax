@@ -4,22 +4,31 @@ import { useMemo, useState } from 'react'
 import { Key, Search } from 'lucide-react'
 import Link from 'next/link'
 import { KeyRowActions } from './key-row-actions'
-import {
-  getApiKeyStatus,
-  detectPlan,
-  type ApiKeyStatusValue,
-} from '@/lib/api-key-status'
+import type { ApiKeyStatusValue } from '@/lib/api-key-status'
 
-export interface SerializedKey {
+/**
+ * Fully server-computed row. All time/locale-dependent values (status,
+ * remaining days, formatted dates) are calculated on the server so the
+ * client render matches SSR exactly — otherwise hydration fails and onClick
+ * handlers never attach (buttons appear but do nothing).
+ */
+export interface EnrichedKey {
   id: string
   name: string
   keyPrefix: string
   keyFullLast4: string
   status: string
   expiresAt: string | null
-  createdAt: string
-  lastUsedAt: string | null
   hourlyTokenBudget: string | null
+  statusValue: ApiKeyStatusValue
+  statusLabel: string
+  remainingLabel: string
+  plan: string
+  createdLabel: string
+  expiryLabel: string
+  createdMs: number
+  expiryMs: number | null
+  remainingDays: number | null
 }
 
 type StatusFilter = 'all' | ApiKeyStatusValue
@@ -35,58 +44,42 @@ const STATUS_BADGE: Record<ApiKeyStatusValue, { ring: string; bg: string; text: 
   revoked: { ring: 'border-white/15', bg: 'bg-white/[0.04]', text: 'text-white/60', dot: 'bg-white/40' },
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-export function KeysTable({ keys }: { keys: SerializedKey[] }) {
+export function KeysTable({ keys }: { keys: EnrichedKey[] }) {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [planFilter, setPlanFilter] = useState<PlanFilter>('all')
   const [sortKey, setSortKey] = useState<SortKey>('created_desc')
 
-  const now = Date.now()
-
   const rows = useMemo(() => {
-    const enriched = keys.map((k) => {
-      const info = getApiKeyStatus(k.expiresAt, k.status, now)
-      const plan = detectPlan(k.hourlyTokenBudget ? BigInt(k.hourlyTokenBudget) : null)
-      return { key: k, info, plan }
-    })
-
-    const filtered = enriched.filter(({ key, info, plan }) => {
-      if (statusFilter !== 'all' && info.status !== statusFilter) return false
-      if (planFilter !== 'all' && plan !== planFilter) return false
+    const filtered = keys.filter((k) => {
+      if (statusFilter !== 'all' && k.statusValue !== statusFilter) return false
+      if (planFilter !== 'all' && k.plan !== planFilter) return false
       if (search.trim()) {
         const q = search.trim().toLowerCase()
-        const hay = `${key.name} ${key.keyPrefix} ${key.keyFullLast4} ${plan}`.toLowerCase()
+        const hay = `${k.name} ${k.keyPrefix} ${k.keyFullLast4} ${k.plan}`.toLowerCase()
         if (!hay.includes(q)) return false
       }
       return true
     })
 
-    const expiryMs = (iso: string | null) => (iso ? new Date(iso).getTime() : Number.POSITIVE_INFINITY)
-    filtered.sort((a, b) => {
+    const expiryMs = (v: number | null) => (v == null ? Number.POSITIVE_INFINITY : v)
+    const sorted = [...filtered].sort((a, b) => {
       switch (sortKey) {
         case 'created_asc':
-          return new Date(a.key.createdAt).getTime() - new Date(b.key.createdAt).getTime()
+          return a.createdMs - b.createdMs
         case 'expiry_asc':
-          return expiryMs(a.key.expiresAt) - expiryMs(b.key.expiresAt)
+          return expiryMs(a.expiryMs) - expiryMs(b.expiryMs)
         case 'expiry_desc':
-          return expiryMs(b.key.expiresAt) - expiryMs(a.key.expiresAt)
+          return expiryMs(b.expiryMs) - expiryMs(a.expiryMs)
         case 'remaining_asc':
-          return (a.info.remainingDays ?? Number.POSITIVE_INFINITY) - (b.info.remainingDays ?? Number.POSITIVE_INFINITY)
+          return (a.remainingDays ?? Number.POSITIVE_INFINITY) - (b.remainingDays ?? Number.POSITIVE_INFINITY)
         case 'created_desc':
         default:
-          return new Date(b.key.createdAt).getTime() - new Date(a.key.createdAt).getTime()
+          return b.createdMs - a.createdMs
       }
     })
-
-    return filtered
-  }, [keys, search, statusFilter, planFilter, sortKey, now])
+    return sorted
+  }, [keys, search, statusFilter, planFilter, sortKey])
 
   return (
     <div className="space-y-4">
@@ -107,7 +100,7 @@ export function KeysTable({ keys }: { keys: SerializedKey[] }) {
             <option value="expiring_soon">Expiring soon</option>
             <option value="expired">Expired</option>
             <option value="lifetime">Lifetime</option>
-            <option value="paused">Paused</option>
+            <option value="paused">Disabled</option>
             <option value="revoked">Revoked</option>
           </select>
           <select value={planFilter} onChange={(e) => setPlanFilter(e.target.value as PlanFilter)} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/80 focus:outline-none">
@@ -152,39 +145,39 @@ export function KeysTable({ keys }: { keys: SerializedKey[] }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {rows.map(({ key, info, plan }) => {
-                  const badge = STATUS_BADGE[info.status]
+                {rows.map((k) => {
+                  const badge = STATUS_BADGE[k.statusValue]
                   return (
-                    <tr key={key.id} className="transition-colors hover:bg-white/[0.03]">
-                      <td className="px-5 py-3 font-medium text-white">{key.name}</td>
+                    <tr key={k.id} className="transition-colors hover:bg-white/[0.03]">
+                      <td className="px-5 py-3 font-medium text-white">{k.name}</td>
                       <td className="px-5 py-3">
                         <code className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-xs text-white/85">
-                          {key.keyPrefix}…{key.keyFullLast4}
+                          {k.keyPrefix}…{k.keyFullLast4}
                         </code>
                       </td>
                       <td className="px-5 py-3">
-                        <span className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-0.5 text-xs text-white/85">{plan}</span>
+                        <span className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-0.5 text-xs text-white/85">{k.plan}</span>
                       </td>
                       <td className="px-5 py-3">
                         <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${badge.ring} ${badge.bg} ${badge.text}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${badge.dot}`} />
-                          {info.label}
+                          {k.statusLabel}
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-white/55">{formatDate(key.createdAt)}</td>
-                      <td className="px-5 py-3 text-white/55">{key.expiresAt ? formatDate(key.expiresAt) : 'Lifetime'}</td>
+                      <td className="px-5 py-3 text-white/55">{k.createdLabel}</td>
+                      <td className="px-5 py-3 text-white/55">{k.expiryLabel}</td>
                       <td className="px-5 py-3">
-                        <span className={info.status === 'expired' ? 'text-rose-300' : info.status === 'expiring_soon' ? 'text-amber-300' : 'text-white/80'}>
-                          {info.remainingLabel}
+                        <span className={k.statusValue === 'expired' ? 'text-rose-300' : k.statusValue === 'expiring_soon' ? 'text-amber-300' : 'text-white/80'}>
+                          {k.remainingLabel}
                         </span>
                       </td>
                       <td className="px-5 py-3">
                         <KeyRowActions
-                          keyId={key.id}
-                          status={key.status}
-                          name={key.name}
-                          expiresAt={key.expiresAt}
-                          hourlyTokenBudget={key.hourlyTokenBudget}
+                          keyId={k.id}
+                          status={k.status}
+                          name={k.name}
+                          expiresAt={k.expiresAt}
+                          hourlyTokenBudget={k.hourlyTokenBudget}
                         />
                       </td>
                     </tr>
