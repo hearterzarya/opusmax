@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { getAdminSession } from '@/lib/auth'
+import { ToastProvider } from '@/components/ui/toast'
 import AdminLayoutClient from './AdminLayoutClient'
 
 export default async function AdminDashboardLayout({
@@ -13,5 +14,9 @@ export default async function AdminDashboardLayout({
     redirect('/admin/login')
   }
 
-  return <AdminLayoutClient>{children}</AdminLayoutClient>
+  return (
+    <ToastProvider>
+      <AdminLayoutClient>{children}</AdminLayoutClient>
+    </ToastProvider>
+  )
 }
