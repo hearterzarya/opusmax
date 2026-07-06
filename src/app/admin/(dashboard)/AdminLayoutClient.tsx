@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 const navItems = [
   { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
   { label: 'API Keys', href: '/admin/keys', icon: Key },
+  { label: 'Latency', href: '/admin/latency', icon: BarChart3 },
   { label: 'Usage', href: '/admin/usage', icon: BarChart3 },
   { label: 'Settings', href: '/admin/settings', icon: Settings },
 ]

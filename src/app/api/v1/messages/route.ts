@@ -8,6 +8,8 @@ import { QUOTA_WINDOW_SECONDS, reserveRollingWindowQuota, settleRollingWindowQuo
 import { upstreamMessagesUrl } from '@/lib/upstream-anthropic'
 import { getUpstreamApiKey, upstreamFetch } from '@/lib/upstream-fetch'
 import { forwardAnthropicMessages, checkBifrostConnection } from '@/lib/bifrost'
+import { createTimingContext, isFirstTextToken } from '@/lib/latency-timing'
+import { persistLatencyMetric } from '@/lib/latency-persist'
 import { z } from 'zod'
 
 const messageSchema = z
@@ -124,12 +126,16 @@ function extractOutputDeltaChars(event: unknown): number {
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now()
+  const timing = createTimingContext()
 
   try {
+    // --- AUTH ---
+    timing.hrAuthStartedAt = performance.now()
     const [auth, requestBody] = await Promise.all([
       validateActiveApiKeyFromRequest(request),
       request.json(),
     ])
+    timing.hrAuthCompletedAt = performance.now()
     if (!auth.ok) return auth.response
 
     const key = auth.key
@@ -148,11 +154,13 @@ export async function POST(request: NextRequest) {
 
     const validatedBody = messageSchema.parse(requestBody)
     const tokens = estimateTokens(validatedBody)
+    timing.requestedModel = validatedBody.model
 
     // 5-hour rolling token window (hard limit) — enforced per API key id.
     const hourlyBudget = key.hourlyTokenBudget
     let projectedRaw = 0
     if (hourlyBudget && hourlyBudget > BigInt(0)) {
+      timing.hrQuotaStartedAt = performance.now()
       const projectedTokens = validatedBody.max_tokens
         ? tokens.raw + validatedBody.max_tokens
         : tokens.raw
@@ -212,10 +220,12 @@ export async function POST(request: NextRequest) {
         return response
       }
       projectedRaw = projectedTokens
+      timing.hrQuotaCompletedAt = performance.now()
     }
 
     // Forward upstream
     let upstreamResponse: Response
+    timing.hrRoutingStartedAt = performance.now()
 
     // Model mapping for Bifrost
     const MODEL_MAP: Record<string, string> = {
@@ -260,11 +270,15 @@ export async function POST(request: NextRequest) {
         if (!process.env.BIFROST_INTERNAL_KEY) {
           throw new Error('Server misconfigured: BIFROST_INTERNAL_KEY is missing')
         }
+        timing.hrRoutingCompletedAt = performance.now()
+        timing.hrVendorRequestStartedAt = performance.now()
         upstreamResponse = await forwardAnthropicMessages(upstreamBody, {
           bifrostBaseUrl,
           bifrostApiKey: process.env.BIFROST_INTERNAL_KEY,
           timeout: 30000, // 30 second timeout
         })
+        timing.hrVendorResponseHeadersAt = performance.now()
+        timing.returnedModel = mappedModel
       } catch (bifrostError) {
         // Fallback to direct upstream if Bifrost fails
         if (process.env.UPSTREAM_ANTHROPIC_BASE_URL) {
@@ -279,6 +293,8 @@ export async function POST(request: NextRequest) {
             )
           }
 
+          timing.hrRoutingCompletedAt = timing.hrRoutingCompletedAt ?? performance.now()
+          timing.hrVendorRequestStartedAt = performance.now()
           upstreamResponse = await upstreamFetch(resolvedMessagesUrl, {
             method: 'POST',
             headers: {
@@ -288,6 +304,8 @@ export async function POST(request: NextRequest) {
             },
             body: JSON.stringify(validatedBody),
           })
+          timing.hrVendorResponseHeadersAt = performance.now()
+          timing.returnedModel = validatedBody.model
         } else {
           throw bifrostError
         }
@@ -304,6 +322,8 @@ export async function POST(request: NextRequest) {
         )
       }
 
+      timing.hrRoutingCompletedAt = timing.hrRoutingCompletedAt ?? performance.now()
+      timing.hrVendorRequestStartedAt = performance.now()
       upstreamResponse = await upstreamFetch(resolvedMessagesUrl, {
         method: 'POST',
         headers: {
@@ -313,6 +333,8 @@ export async function POST(request: NextRequest) {
         },
         body: JSON.stringify(validatedBody),
       })
+      timing.hrVendorResponseHeadersAt = performance.now()
+      timing.returnedModel = validatedBody.model
     }
 
     // Streaming branch: proxy SSE while observing usage events to settle quota.
@@ -325,8 +347,15 @@ export async function POST(request: NextRequest) {
       let observedOutputTokens: number | null = null
       let observedOutputChars = 0
       let finalized = false
+      let firstByteRecorded = false
 
       const processSseChunk = (chunkText: string) => {
+        // Record first byte timing
+        if (!firstByteRecorded) {
+          firstByteRecorded = true
+          timing.hrVendorFirstByteAt = performance.now()
+        }
+
         sseBuffer += chunkText
         let newlineIndex = sseBuffer.indexOf('\n')
         while (newlineIndex !== -1) {
@@ -341,6 +370,11 @@ export async function POST(request: NextRequest) {
                 if (usage.inputTokens !== null) observedInputTokens = usage.inputTokens
                 if (usage.outputTokens !== null) observedOutputTokens = usage.outputTokens
                 observedOutputChars += extractOutputDeltaChars(event)
+
+                // Detect first AI text token
+                if (timing.hrVendorFirstTextTokenAt == null && isFirstTextToken(event)) {
+                  timing.hrVendorFirstTextTokenAt = performance.now()
+                }
               } catch {
                 // ignore non-JSON data lines
               }
@@ -353,6 +387,14 @@ export async function POST(request: NextRequest) {
       const finalizeStreamingMetrics = (statusCode: number, provider: string = 'direct') => {
         if (finalized) return
         finalized = true
+        timing.hrVendorStreamCompletedAt = performance.now()
+        timing.hrOpusxResponseCompletedAt = performance.now()
+        timing.statusCode = statusCode
+        timing.success = statusCode >= 200 && statusCode < 400
+
+        // Persist latency metric (fire-and-forget)
+        persistLatencyMetric(timing)
+
         const latencyMs = Date.now() - startTime
         const inputTokens = observedInputTokens ?? tokens.raw
         const estimatedOutputFromChars = Math.ceil(observedOutputChars / 4)
@@ -398,6 +440,10 @@ export async function POST(request: NextRequest) {
             }
             if (value) {
               processSseChunk(decoder.decode(value, { stream: true }))
+              // Record when first text token is forwarded to the user
+              if (timing.hrOpusxFirstTextTokenForwardedAt == null && timing.hrVendorFirstTextTokenAt != null) {
+                timing.hrOpusxFirstTextTokenForwardedAt = performance.now()
+              }
               controller.enqueue(value)
             }
           } catch (error) {
@@ -485,6 +531,12 @@ export async function POST(request: NextRequest) {
     prisma.apiKey
       .update({ where: { id: key.id }, data: { lastUsedAt: new Date() } })
       .catch((err) => console.error('lastUsedAt update failed:', err))
+
+    // Persist latency metric for non-streaming requests
+    timing.hrOpusxResponseCompletedAt = performance.now()
+    timing.statusCode = upstreamResponse.status
+    timing.success = upstreamResponse.status >= 200 && upstreamResponse.status < 400
+    persistLatencyMetric(timing)
 
     return NextResponse.json(responseData, { status: upstreamResponse.status })
   } catch (error) {
