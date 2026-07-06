@@ -90,31 +90,55 @@ export interface LatencyHistoryPoint {
 export async function getLatencyStats(range: TimeRange = '15m') {
   const since = new Date(Date.now() - rangeToMs(range))
 
-  const metrics = await prisma.apiLatencyMetric.findMany({
-    where: {
-      createdAt: { gte: since },
-      sourceType: 'REAL_TRAFFIC',
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 500,
-    select: {
-      vendorHeadersMs: true,
-      vendorFirstByteMs: true,
-      vendorFirstTokenMs: true,
-      vendorTotalMs: true,
-      opusxFirstTokenMs: true,
-      opusxTotalMs: true,
-      preVendorMs: true,
-      authMs: true,
-      quotaMs: true,
-      routingMs: true,
-      firstTokenOverheadMs: true,
-      postVendorFirstTokenOverheadMs: true,
-      statusCode: true,
-      success: true,
-      createdAt: true,
-    },
-  })
+  // Use $queryRaw to avoid dependency on locally-generated Prisma client for
+  // the new ApiLatencyMetric model. On Vercel the generated client will have it,
+  // but locally prisma generate may not have completed.
+  let metrics: Array<Record<string, unknown>> = []
+  try {
+    if (prisma.apiLatencyMetric) {
+      metrics = await prisma.apiLatencyMetric.findMany({
+        where: {
+          createdAt: { gte: since },
+          sourceType: 'REAL_TRAFFIC',
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+        select: {
+          vendorHeadersMs: true,
+          vendorFirstByteMs: true,
+          vendorFirstTokenMs: true,
+          vendorTotalMs: true,
+          opusxFirstTokenMs: true,
+          opusxTotalMs: true,
+          preVendorMs: true,
+          authMs: true,
+          quotaMs: true,
+          routingMs: true,
+          firstTokenOverheadMs: true,
+          postVendorFirstTokenOverheadMs: true,
+          statusCode: true,
+          success: true,
+          createdAt: true,
+        },
+      })
+    } else {
+      // Fallback: raw query when Prisma client hasn't been regenerated
+      metrics = await prisma.$queryRaw<Array<Record<string, unknown>>>`
+        SELECT "vendorHeadersMs", "vendorFirstByteMs", "vendorFirstTokenMs", "vendorTotalMs",
+               "opusxFirstTokenMs", "opusxTotalMs", "preVendorMs", "authMs", "quotaMs",
+               "routingMs", "firstTokenOverheadMs", "postVendorFirstTokenOverheadMs",
+               "statusCode", "success", "createdAt"
+        FROM "api_latency_metrics"
+        WHERE "createdAt" >= ${since} AND "sourceType" = 'REAL_TRAFFIC'
+        ORDER BY "createdAt" DESC
+        LIMIT 500
+      `
+    }
+  } catch (err) {
+    // Table may not exist yet in some environments
+    console.warn('[latency-stats] Query failed (table may not exist):', (err as Error).message)
+    metrics = []
+  }
 
   const total = metrics.length
   const successCount = metrics.filter((m) => m.success).length

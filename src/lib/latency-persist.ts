@@ -18,34 +18,60 @@ export function persistLatencyMetric(
 ): void {
   const metrics = calculateMetrics(ctx)
 
-  prisma.apiLatencyMetric
-    .create({
-      data: {
-        requestId: ctx.requestId,
-        sourceType,
-        probeRegion: null,
-        requestedModel: ctx.requestedModel,
-        returnedModel: ctx.returnedModel,
-        authMs: metrics.authMs,
-        quotaMs: metrics.quotaMs,
-        routingMs: metrics.routingMs,
-        preVendorMs: metrics.preVendorMs,
-        vendorHeadersMs: metrics.vendorHeadersMs,
-        vendorFirstByteMs: metrics.vendorFirstByteMs,
-        vendorFirstTokenMs: metrics.vendorFirstTokenMs,
-        vendorTotalMs: metrics.vendorTotalMs,
-        opusxFirstTokenMs: metrics.opusxFirstTokenMs,
-        opusxTotalMs: metrics.opusxTotalMs,
-        firstTokenOverheadMs: metrics.firstTokenOverheadMs,
-        postVendorFirstTokenOverheadMs: metrics.postVendorFirstTokenOverheadMs,
-        streamCompletionOverheadMs: metrics.streamCompletionOverheadMs,
-        statusCode: ctx.statusCode,
-        success: ctx.success ?? false,
-        errorType: ctx.errorType,
-        errorMessage: ctx.errorMessage?.slice(0, 500) ?? null,
-      },
-    })
-    .catch((err) => {
+  const data = {
+    requestId: ctx.requestId,
+    sourceType,
+    probeRegion: null,
+    requestedModel: ctx.requestedModel,
+    returnedModel: ctx.returnedModel,
+    authMs: metrics.authMs,
+    quotaMs: metrics.quotaMs,
+    routingMs: metrics.routingMs,
+    preVendorMs: metrics.preVendorMs,
+    vendorHeadersMs: metrics.vendorHeadersMs,
+    vendorFirstByteMs: metrics.vendorFirstByteMs,
+    vendorFirstTokenMs: metrics.vendorFirstTokenMs,
+    vendorTotalMs: metrics.vendorTotalMs,
+    opusxFirstTokenMs: metrics.opusxFirstTokenMs,
+    opusxTotalMs: metrics.opusxTotalMs,
+    firstTokenOverheadMs: metrics.firstTokenOverheadMs,
+    postVendorFirstTokenOverheadMs: metrics.postVendorFirstTokenOverheadMs,
+    streamCompletionOverheadMs: metrics.streamCompletionOverheadMs,
+    statusCode: ctx.statusCode,
+    success: ctx.success ?? false,
+    errorType: ctx.errorType,
+    errorMessage: ctx.errorMessage?.slice(0, 500) ?? null,
+  }
+
+  // Use typed client if available, otherwise raw INSERT
+  const writeMetric = async () => {
+    try {
+      if (prisma.apiLatencyMetric) {
+        await prisma.apiLatencyMetric.create({ data })
+      } else {
+        await prisma.$executeRaw`
+          INSERT INTO "api_latency_metrics" (
+            "id", "requestId", "sourceType", "probeRegion", "requestedModel", "returnedModel",
+            "authMs", "quotaMs", "routingMs", "preVendorMs",
+            "vendorHeadersMs", "vendorFirstByteMs", "vendorFirstTokenMs", "vendorTotalMs",
+            "opusxFirstTokenMs", "opusxTotalMs",
+            "firstTokenOverheadMs", "postVendorFirstTokenOverheadMs", "streamCompletionOverheadMs",
+            "statusCode", "success", "errorType", "errorMessage", "createdAt"
+          ) VALUES (
+            ${crypto.randomUUID()}, ${data.requestId}, ${data.sourceType}, ${data.probeRegion},
+            ${data.requestedModel}, ${data.returnedModel},
+            ${data.authMs}, ${data.quotaMs}, ${data.routingMs}, ${data.preVendorMs},
+            ${data.vendorHeadersMs}, ${data.vendorFirstByteMs}, ${data.vendorFirstTokenMs}, ${data.vendorTotalMs},
+            ${data.opusxFirstTokenMs}, ${data.opusxTotalMs},
+            ${data.firstTokenOverheadMs}, ${data.postVendorFirstTokenOverheadMs}, ${data.streamCompletionOverheadMs},
+            ${data.statusCode}, ${data.success}, ${data.errorType}, ${data.errorMessage}, NOW()
+          )
+        `
+      }
+    } catch (err) {
       console.error('[latency-persist] Failed to save metric:', err)
-    })
+    }
+  }
+
+  writeMetric()
 }
