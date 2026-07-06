@@ -5,7 +5,6 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
-  Clock,
   Globe,
   Info,
   Radio,
@@ -38,6 +37,20 @@ interface WrapperData {
   status: string
 }
 
+interface VendorStatus {
+  vendor: string
+  metric: string
+  latencyMs: number | null
+  displayValue: string
+  status: string
+  source: string
+  sourcePage: string
+  extractionMethod: string | null
+  sourceCheckedAt: string | null
+  updatedAt: string | null
+  errorCode: string | null
+}
+
 /** Format ms intelligently: < 1000 → "824 ms", >= 1000 → "1.82 sec" */
 function fmtMs(v: number | null | undefined): string {
   if (v == null) return '—'
@@ -53,16 +66,6 @@ function fmtMsShort(v: number | null | undefined): string {
 function pct(v: number | null | undefined): string {
   if (v == null) return '—'
   return `${v.toFixed(2)}%`
-}
-
-/** Gateway-specific status thresholds (lightweight API requests) */
-function gatewayStatus(headersMs: number | null): string {
-  if (headersMs == null) return 'No Data'
-  if (headersMs <= 150) return 'Excellent'
-  if (headersMs <= 300) return 'Good'
-  if (headersMs <= 700) return 'Moderate'
-  if (headersMs <= 1500) return 'Slow'
-  return 'Very Slow'
 }
 
 const STATUS_BADGE_COLOR: Record<string, string> = {
@@ -83,6 +86,7 @@ const SEVERITY_STYLES: Record<string, { border: string; bg: string; text: string
 
 export default function LatencyDashboardPage() {
   const [data, setData] = useState<LatencyData | null>(null)
+  const [vendorStatus, setVendorStatus] = useState<VendorStatus | null>(null)
   const [range, setRange] = useState<string>('15m')
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -91,10 +95,12 @@ export default function LatencyDashboardPage() {
   const fetchData = useCallback(async (isBackground = false) => {
     if (isBackground) setRefreshing(true)
     try {
-      const res = await fetch(`/api/admin/infrastructure-latency?range=${range}`)
-      if (res.ok) {
-        setData(await res.json())
-      }
+      const [latencyRes, statusRes] = await Promise.all([
+        fetch(`/api/admin/infrastructure-latency?range=${range}`),
+        fetch('/api/admin/vendor-status-latency'),
+      ])
+      if (latencyRes.ok) setData(await latencyRes.json())
+      if (statusRes.ok) setVendorStatus(await statusRes.json())
     } catch { /* keep old data */ } finally {
       setLoading(false)
       setRefreshing(false)
@@ -125,65 +131,34 @@ export default function LatencyDashboardPage() {
         </div>
       </div>
 
-      {data && <>
-        <DiagnosticBanner diagnostic={data.diagnostic} />
+      {(data || vendorStatus) && <>
+        {data && <DiagnosticBanner diagnostic={data.diagnostic} />}
 
-        {/* ═══ 4 MAIN CARDS ═══ */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {/* CARD 1: OpusMax API Gateway */}
-          <MetricCard
-            icon={Server} iconColor="text-violet-300" glow="bg-violet-500/20"
-            title="OpusMax API Gateway" subtitle="Vendor API Responsiveness"
-            heroValue={fmtMsShort(data.services.opusmax.current.headersMs)}
-            heroLabel="API Gateway Latency"
-            statusLabel={gatewayStatus(data.services.opusmax.current.headersMs)}
-            stats={[
-              { label: 'Response Headers', value: fmtMsShort(data.services.opusmax.current.headersMs) },
-              { label: 'P50 Gateway', value: fmtMsShort(data.services.opusmax.statistics.p50TotalMs) },
-              { label: 'P95 Gateway', value: fmtMsShort(data.services.opusmax.statistics.p95TotalMs) },
-              { label: 'Success Rate', value: pct(data.services.opusmax.statistics.successRate) },
-              { label: 'Samples', value: String(data.services.opusmax.statistics.sampleCount) },
-            ]}
-            tooltip="Measures a lightweight authenticated API request to OpusMax. NOT the AI model generation time."
-          />
+        {/* ═══ VENDOR STATUS MIRROR (zero-token) ═══ */}
+        {vendorStatus && <VendorStatusCard data={vendorStatus} />}
 
-          {/* CARD 2: OpusMax AI Response */}
-          <MetricCard
-            icon={Clock} iconColor="text-fuchsia-300" glow="bg-fuchsia-500/20"
-            title="OpusMax AI Response" subtitle="Vendor Model Generation"
-            heroValue={fmtMs(data.services.opusmax.current.firstTokenMs)}
-            heroLabel="AI First Token"
-            statusLabel={null}
-            stats={[
-              { label: 'Response Headers', value: fmtMsShort(data.services.opusmax.current.headersMs) },
-              { label: 'First Byte', value: fmtMsShort(data.services.opusmax.current.firstByteMs) },
-              { label: 'AI First Token', value: fmtMs(data.services.opusmax.current.firstTokenMs) },
-              { label: 'Full Response', value: fmtMs(data.services.opusmax.current.totalMs) },
-              { label: 'P50 First Token', value: fmtMs(data.services.opusmax.statistics.p50FirstTokenMs) },
-              { label: 'P95 First Token', value: fmtMs(data.services.opusmax.statistics.p95FirstTokenMs) },
-            ]}
-            tooltip="Time until the AI model generates its first text token. This is NOT API/network latency — it includes model inference time."
-          />
-
-          {/* CARD 3: OpusX Gateway */}
+        {/* ═══ REAL-TRAFFIC INSTRUMENTATION CARDS ═══ */}
+        {data && <>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {/* CARD: OpusX Real Traffic - AI Response (from actual user requests) */}
           <MetricCard
             icon={Globe} iconColor="text-cyan-300" glow="bg-cyan-500/20"
-            title="OpusX Gateway" subtitle="Your API Wrapper (End-to-End)"
+            title="OpusX Real Traffic" subtitle="From Actual User Requests"
             heroValue={fmtMs(data.services.opusx.current.firstTokenMs)}
             heroLabel="AI First Token (E2E)"
             statusLabel={null}
             stats={[
-              { label: 'AI First Token', value: fmtMs(data.services.opusx.current.firstTokenMs) },
+              { label: 'Vendor Headers', value: fmtMsShort(data.services.opusmax.current.headersMs) },
+              { label: 'Vendor First Byte', value: fmtMsShort(data.services.opusmax.current.firstByteMs) },
+              { label: 'Vendor AI Token', value: fmtMs(data.services.opusmax.current.firstTokenMs) },
               { label: 'Full Response', value: fmtMs(data.services.opusx.current.totalMs) },
               { label: 'P50 First Token', value: fmtMs(data.services.opusx.statistics.p50FirstTokenMs) },
               { label: 'P95 First Token', value: fmtMs(data.services.opusx.statistics.p95FirstTokenMs) },
-              { label: 'Success Rate', value: pct(data.services.opusx.statistics.successRate) },
-              { label: 'Samples', value: String(data.services.opusx.statistics.sampleCount) },
             ]}
-            tooltip="Total time from user request arriving at OpusX until the first AI text token is forwarded back."
+            tooltip="Measured from actual user requests flowing through OpusX. Includes AI model generation time."
           />
 
-          {/* CARD 4: Wrapper Overhead */}
+          {/* CARD: Wrapper Overhead */}
           <MetricCard
             icon={Zap} iconColor="text-amber-300" glow="bg-amber-500/20"
             title="Wrapper Overhead" subtitle="Latency Added by OpusX"
@@ -198,41 +173,16 @@ export default function LatencyDashboardPage() {
               { label: 'P50 Overhead', value: fmtMsShort(data.wrapper.statistics.p50OverheadMs) },
               { label: 'P95 Overhead', value: fmtMsShort(data.wrapper.statistics.p95OverheadMs) },
             ]}
-            tooltip="How much extra latency OpusX adds on top of the vendor's AI response time."
+            tooltip="How much extra latency OpusX adds on top of the vendor's response. Measured from real traffic."
           />
-        </div>
 
-        {/* ═══ LATENCY SUMMARY ═══ */}
-        <div className="glass rounded-2xl p-5">
-          <h3 className="font-display tracking-display text-lg font-semibold text-white">Latency Layer Summary</h3>
-          <p className="mt-1 text-xs text-white/45">API/network latency and AI model latency are different layers — do not compare them directly.</p>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-              <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/45">Network / API Layer</p>
-              <div className="mt-3 space-y-2 text-sm">
-                <SummaryRow label="OpusMax Gateway" value={fmtMsShort(data.services.opusmax.current.headersMs)} />
-                <SummaryRow label="Wrapper Overhead" value={data.wrapper.current.firstTokenOverheadMs != null ? `+${fmtMsShort(data.wrapper.current.firstTokenOverheadMs)}` : '—'} />
-              </div>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-              <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-white/45">AI Generation Layer</p>
-              <div className="mt-3 space-y-2 text-sm">
-                <SummaryRow label="Vendor AI First Token" value={fmtMs(data.services.opusmax.current.firstTokenMs)} />
-                <SummaryRow label="OpusX AI First Token" value={fmtMs(data.services.opusx.current.firstTokenMs)} />
-                <SummaryRow label="Full Response" value={fmtMs(data.services.opusmax.current.totalMs)} />
-              </div>
-            </div>
-          </div>
+          {/* CARD: Monitor Info */}
+          <MonitorInfoCard monitor={data.monitor} />
         </div>
-
-        {/* ═══ AI FIRST TOKEN CHART ═══ */}
-        <HistorySection history={data.history} />
 
         {/* ═══ PROCESSING BREAKDOWN ═══ */}
-        <div className="grid gap-4 md:grid-cols-2">
-          <MonitorInfoCard monitor={data.monitor} />
-          <DetailedOverhead data={data.wrapper} />
-        </div>
+        <DetailedOverhead data={data.wrapper} />
+        </>}
       </>}
     </div>
   )
@@ -312,36 +262,6 @@ function MetricCard({ icon: IconComp, iconColor, glow, title, subtitle, heroValu
   )
 }
 
-function HistorySection({ history }: { history: LatencyData['history'] }) {
-  if (history.length === 0) {
-    return (
-      <div className="glass rounded-2xl p-6 text-center">
-        <Clock className="mx-auto h-8 w-8 text-white/30" />
-        <p className="mt-2 text-sm text-white/55">No latency history yet. Send requests through OpusX to populate.</p>
-      </div>
-    )
-  }
-  const maxMs = Math.max(...history.map((h) => Math.max(h.vendorFirstTokenMs ?? 0, h.opusxFirstTokenMs ?? 0, 1)))
-  return (
-    <div className="glass rounded-2xl p-6">
-      <h3 className="font-display tracking-display text-xl font-semibold text-white">AI First Token Performance</h3>
-      <p className="mt-1 text-xs text-white/50">Vendor AI first token (violet) vs OpusX end-to-end first token (cyan). This is AI generation time, not API/network latency.</p>
-      <div className="mt-4 flex h-32 items-end gap-px">
-        {history.slice(-60).map((h, i) => {
-          const vendorH = ((h.vendorFirstTokenMs ?? 0) / maxMs) * 100
-          const opusxH = ((h.opusxFirstTokenMs ?? 0) / maxMs) * 100
-          return (
-            <div key={i} className="group relative flex flex-1 flex-col items-center gap-px" title={`Vendor AI: ${fmtMs(h.vendorFirstTokenMs)} | OpusX E2E: ${fmtMs(h.opusxFirstTokenMs)} | Overhead: ${fmtMsShort(h.overheadMs)}`}>
-              <div className="w-full rounded-t-sm bg-violet-500/60" style={{ height: `${vendorH}%`, minHeight: vendorH > 0 ? 2 : 0 }} />
-              <div className="w-full rounded-t-sm bg-cyan-400/60" style={{ height: `${Math.max(0, opusxH - vendorH)}%`, minHeight: opusxH > vendorH ? 1 : 0 }} />
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
 function MonitorInfoCard({ monitor }: { monitor: LatencyData['monitor'] }) {
   return (
     <div className="glass rounded-2xl p-5">
@@ -376,15 +296,6 @@ function DetailedOverhead({ data }: { data: WrapperData }) {
   )
 }
 
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-white/60">{label}</span>
-      <span className="font-mono text-white/90">{value}</span>
-    </div>
-  )
-}
-
 function BreakdownBar({ label, ms, max, color }: { label: string; ms: number | null; max: number; color: string }) {
   const width = ms != null ? Math.min(100, (ms / max) * 100) : 0
   return (
@@ -402,6 +313,54 @@ function BreakdownBar({ label, ms, max, color }: { label: string; ms: number | n
 
 function Stat({ label, value }: { label: string; value: string }) {
   return <div><p className="text-white/45">{label}</p><p className="font-medium text-white/90">{value}</p></div>
+}
+
+function VendorStatusCard({ data }: { data: VendorStatus }) {
+  const statusColor = data.status === 'LIVE' ? 'text-emerald-300' : data.status === 'STALE' ? 'text-amber-300' : 'text-rose-300'
+  const statusDot = data.status === 'LIVE' ? 'bg-emerald-400 animate-pulse' : data.status === 'STALE' ? 'bg-amber-400' : 'bg-rose-400'
+  const heroValue = data.latencyMs != null ? `${data.latencyMs} ms` : '—'
+
+  const lastSyncedAgo = data.sourceCheckedAt
+    ? `${Math.max(0, Math.round((Date.now() - new Date(data.sourceCheckedAt).getTime()) / 1000))} sec ago`
+    : '—'
+
+  return (
+    <div className="glass lift relative overflow-hidden rounded-2xl p-6">
+      <div aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-violet-500/20 blur-2xl" />
+      <div className="relative">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Server className="h-5 w-5 text-violet-300" />
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/45">OpusMax Vendor Latency</p>
+              <p className="text-xs text-white/40">Live from OpusMax public status system</p>
+            </div>
+          </div>
+          <span className={`inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-xs font-medium ${statusColor}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${statusDot}`} />
+            {data.status}
+          </span>
+        </div>
+
+        <p className="font-display tracking-display mt-4 text-5xl font-semibold text-white">{heroValue}</p>
+        <p className="mt-1 text-xs text-white/50">Vendor Status Latency</p>
+
+        <div className="mt-5 grid grid-cols-2 gap-y-3 text-xs">
+          <Stat label="Source" value={data.source} />
+          <Stat label="Refresh Source" value="30 sec" />
+          <Stat label="Last Synced" value={lastSyncedAgo} />
+          <Stat label="Extraction" value={data.extractionMethod ?? '—'} />
+        </div>
+
+        <div className="mt-4 rounded-xl border border-white/5 bg-white/[0.02] p-3">
+          <p className="flex items-start gap-1.5 text-[10px] text-white/40">
+            <Info className="h-3 w-3 mt-0.5 shrink-0" />
+            This value mirrors the latency reported by the OpusMax public status system. OpusX does not send AI generation requests to calculate this metric.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function SkeletonCard() {
