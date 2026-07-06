@@ -134,3 +134,44 @@ model AuditLog {
   @@index([timestamp])
   @@map("audit_logs")
 }
+
+
+model ApiLatencyMetric {
+  id        String @id @default(cuid())
+  requestId String @unique
+
+  sourceType     String   // REAL_TRAFFIC, SYNTHETIC_VENDOR, SYNTHETIC_OPUSX, REGION_PROBE
+  probeRegion    String?
+  requestedModel String?
+  returnedModel  String?
+
+  authMs       Float?
+  quotaMs      Float?
+  routingMs    Float?
+  preVendorMs  Float?
+
+  vendorHeadersMs    Float?
+  vendorFirstByteMs  Float?
+  vendorFirstTokenMs Float?
+  vendorTotalMs      Float?
+
+  opusxFirstTokenMs Float?
+  opusxTotalMs      Float?
+
+  firstTokenOverheadMs          Float?
+  postVendorFirstTokenOverheadMs Float?
+  streamCompletionOverheadMs    Float?
+
+  statusCode   Int?
+  success      Boolean
+  errorType    String?
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+
+  @@index([sourceType, createdAt])
+  @@index([success, createdAt])
+  @@index([requestedModel, createdAt])
+  @@index([createdAt])
+  @@map("api_latency_metrics")
+}
