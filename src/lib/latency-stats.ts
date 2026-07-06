@@ -282,92 +282,75 @@ function deriveDiagnostic(
     }
   }
 
-  const p95Vendor = opusmax.statistics.p95FirstTokenMs
+  const p95VendorFirstToken = opusmax.statistics.p95FirstTokenMs
   const p50Overhead = wrapper.statistics.p50OverheadMs
   const preVendor = wrapper.current.preVendorMs
+  const headersMs = opusmax.current.headersMs
 
-  // Check for OpusX internal issues first
+  // ─── OpusX internal issues (check first — these are actionable) ───
+
   if (preVendor != null && preVendor > 500) {
     const authMs = wrapper.current.authMs
     const quotaMs = wrapper.current.quotaMs
     const routingMs = wrapper.current.routingMs
 
     if (authMs != null && authMs > 200) {
-      return {
-        code: 'OPUSX_AUTH_SLOW',
-        title: 'Auth Slow',
-        message: `OpusX authentication is taking ${Math.round(authMs)}ms. Check database connection and API key lookup indexes.`,
-        severity: 'warning',
-      }
+      return { code: 'OPUSX_AUTH_SLOW', title: 'Auth Slow', message: `OpusX authentication is taking ${Math.round(authMs)}ms. Check database connection and API key indexes.`, severity: 'warning' }
     }
     if (quotaMs != null && quotaMs > 200) {
-      return {
-        code: 'OPUSX_QUOTA_SLOW',
-        title: 'Quota Check Slow',
-        message: `Quota validation is taking ${Math.round(quotaMs)}ms. Check database/Redis performance.`,
-        severity: 'warning',
-      }
+      return { code: 'OPUSX_QUOTA_SLOW', title: 'Quota Check Slow', message: `Quota validation is taking ${Math.round(quotaMs)}ms. Check database/Redis performance.`, severity: 'warning' }
     }
     if (routingMs != null && routingMs > 100) {
+      return { code: 'OPUSX_ROUTING_SLOW', title: 'Routing Slow', message: `Model routing is taking ${Math.round(routingMs)}ms. Check Bifrost connectivity.`, severity: 'warning' }
+    }
+    return { code: 'OPUSX_PREPROCESSING_SLOW', title: 'OpusX Preprocessing Slow', message: `OpusX pre-vendor processing is ${Math.round(preVendor)}ms. This adds directly to user-perceived latency.`, severity: 'warning' }
+  }
+
+  if (p50Overhead != null && p50Overhead > 250) {
+    return { code: 'OPUSX_STREAM_OVERHEAD_HIGH', title: 'Stream Overhead High', message: `OpusX adds ${Math.round(p50Overhead)}ms P50 overhead. Streaming forwarding may be delayed.`, severity: 'warning' }
+  }
+
+  // ─── Vendor gateway/network issues (API layer) ───
+  // Only flag if the lightweight API response headers are slow.
+  // Do NOT compare gateway latency (80ms) with AI first-token (2000ms) — they are different layers.
+  if (headersMs != null && headersMs > 700) {
+    return {
+      code: 'VENDOR_NETWORK_PATH_SLOW',
+      title: 'Vendor API Gateway Slow',
+      message: `OpusMax response headers take ${Math.round(headersMs)}ms. The vendor API gateway or network path is adding unusual latency.`,
+      severity: 'warning',
+    }
+  }
+
+  // ─── Vendor AI generation issues ───
+  // AI first-token is naturally 1–3 seconds. Only flag if P95 is significantly elevated
+  // above a reasonable AI baseline (not compared against gateway latency).
+  if (p95VendorFirstToken != null && p95VendorFirstToken > 4000) {
+    // API layer is healthy but AI is slow
+    if (headersMs != null && headersMs < 500) {
       return {
-        code: 'OPUSX_ROUTING_SLOW',
-        title: 'Routing Slow',
-        message: `Model routing is taking ${Math.round(routingMs)}ms. Check Bifrost connectivity.`,
+        code: 'VENDOR_AI_SLOW',
+        title: 'Vendor AI Generation Slow',
+        message: `The OpusMax API gateway is responding normally (${Math.round(headersMs)}ms), but AI first-token P95 is ${fmtMsForDiag(p95VendorFirstToken)}. Model inference is taking longer than usual.`,
         severity: 'warning',
       }
     }
-
-    return {
-      code: 'OPUSX_PREPROCESSING_SLOW',
-      title: 'OpusX Preprocessing Slow',
-      message: `OpusX pre-vendor processing is ${Math.round(preVendor)}ms. This adds directly to user-perceived latency.`,
-      severity: 'warning',
+    // Both elevated
+    if (p50Overhead != null && p50Overhead > 200) {
+      return { code: 'BOTH_DEGRADED', title: 'Both Degraded', message: `Vendor AI P95: ${fmtMsForDiag(p95VendorFirstToken)}, OpusX overhead P50: ${Math.round(p50Overhead)}ms — both elevated.`, severity: 'critical' }
     }
+    return { code: 'VENDOR_AI_SLOW', title: 'Vendor AI Slow', message: `OpusMax AI first-token P95 is ${fmtMsForDiag(p95VendorFirstToken)}. This is AI model generation time, not API/network latency.`, severity: 'warning' }
   }
 
-  // Check stream overhead
-  if (p50Overhead != null && p50Overhead > 250 && p95Vendor != null && p95Vendor < 2000) {
-    return {
-      code: 'OPUSX_STREAM_OVERHEAD_HIGH',
-      title: 'Stream Overhead High',
-      message: `OpusX adds ${Math.round(p50Overhead)}ms P50 overhead on top of vendor latency. Streaming forwarding may be delayed.`,
-      severity: 'warning',
-    }
-  }
-
-  // Vendor issues
-  if (p95Vendor != null && p95Vendor > 3000) {
-    const headersMs = opusmax.current.headersMs
-    if (headersMs != null && headersMs > 1000) {
-      return {
-        code: 'VENDOR_NETWORK_PATH_SLOW',
-        title: 'Vendor Network Path Slow',
-        message: `OpusMax response headers take ${Math.round(headersMs)}ms. The network path to the vendor is adding latency.`,
-        severity: 'warning',
-      }
-    }
-
-    return {
-      code: 'VENDOR_AI_SLOW',
-      title: 'Vendor AI Slow',
-      message: `OpusMax P95 first-token latency is ${Math.round(p95Vendor)}ms. AI generation at the vendor is slow.`,
-      severity: 'warning',
-    }
-  }
-
-  if (p95Vendor != null && p95Vendor > 2000 && p50Overhead != null && p50Overhead > 200) {
-    return {
-      code: 'BOTH_DEGRADED',
-      title: 'Both Degraded',
-      message: `Both vendor (P95: ${Math.round(p95Vendor)}ms) and OpusX overhead (P50: ${Math.round(p50Overhead)}ms) are elevated.`,
-      severity: 'critical',
-    }
-  }
-
+  // ─── Healthy ───
   return {
     code: 'HEALTHY',
     title: 'Healthy',
-    message: 'All latency metrics are within normal ranges. OpusMax vendor and OpusX wrapper are performing well.',
+    message: 'OpusMax API gateway is responsive. AI generation is within normal range. OpusX wrapper overhead is low.',
     severity: 'info',
   }
+}
+
+function fmtMsForDiag(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(2)} sec` : `${Math.round(ms)} ms`
 }
