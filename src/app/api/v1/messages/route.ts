@@ -10,6 +10,7 @@ import { getUpstreamApiKey, upstreamFetch } from '@/lib/upstream-fetch'
 import { forwardAnthropicMessages, checkBifrostConnection } from '@/lib/bifrost'
 import { createTimingContext, isFirstTextToken } from '@/lib/latency-timing'
 import { persistLatencyMetric } from '@/lib/latency-persist'
+import { resolveProvider } from '@/lib/provider-resolver'
 import { z } from 'zod'
 
 const messageSchema = z
@@ -280,47 +281,43 @@ export async function POST(request: NextRequest) {
         timing.hrVendorResponseHeadersAt = performance.now()
         timing.returnedModel = mappedModel
       } catch (bifrostError) {
-        // Fallback to direct upstream if Bifrost fails
-        if (process.env.UPSTREAM_ANTHROPIC_BASE_URL) {
-          console.warn('Bifrost failed, falling back to direct upstream:', bifrostError)
-          const resolvedMessagesUrl = upstreamMessagesUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
-          const upstreamApiKey = getUpstreamApiKey()
-          if (!upstreamApiKey) {
-            return createErrorResponse(
-              ErrorCodes.UPSTREAM_ERROR,
-              'Server misconfigured: ANTHROPIC_API_KEY is missing',
-              500
-            )
-          }
-
-          timing.hrRoutingCompletedAt = timing.hrRoutingCompletedAt ?? performance.now()
-          timing.hrVendorRequestStartedAt = performance.now()
-          upstreamResponse = await upstreamFetch(resolvedMessagesUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': upstreamApiKey,
-              'anthropic-version': '2023-06-01',
-            },
-            body: JSON.stringify(validatedBody),
-          })
-          timing.hrVendorResponseHeadersAt = performance.now()
-          timing.returnedModel = validatedBody.model
-        } else {
-          throw bifrostError
+        // Fallback to direct upstream via dynamic provider
+        console.warn('Bifrost failed, falling back to direct upstream:', bifrostError)
+        const provider = await resolveProvider()
+        if (!provider) {
+          return createErrorResponse(
+            ErrorCodes.UPSTREAM_ERROR,
+            'No upstream provider configured. Add a provider in Admin → Providers.',
+            500
+          )
         }
+
+        const resolvedMessagesUrl = `${provider.baseUrl}/v1/messages`
+        timing.hrRoutingCompletedAt = timing.hrRoutingCompletedAt ?? performance.now()
+        timing.hrVendorRequestStartedAt = performance.now()
+        upstreamResponse = await upstreamFetch(resolvedMessagesUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...provider.authHeaders,
+            'anthropic-version': provider.anthropicVersion,
+          },
+          body: JSON.stringify(validatedBody),
+        })
+        timing.hrVendorResponseHeadersAt = performance.now()
+        timing.returnedModel = validatedBody.model
       }
     } else {
-      // Use direct upstream if Bifrost is not configured
-      const resolvedMessagesUrl = upstreamMessagesUrl(process.env.UPSTREAM_ANTHROPIC_BASE_URL)
-      const upstreamApiKey = getUpstreamApiKey()
-      if (!upstreamApiKey) {
+      // Use direct upstream via dynamic provider (no Bifrost configured)
+      const provider = await resolveProvider()
+      if (!provider) {
         return createErrorResponse(
           ErrorCodes.UPSTREAM_ERROR,
-          'Server misconfigured: ANTHROPIC_API_KEY is missing',
+          'No upstream provider configured. Add a provider in Admin → Providers, or set ANTHROPIC_API_KEY in environment.',
           500
         )
       }
+      const resolvedMessagesUrl = `${provider.baseUrl}/v1/messages`
 
       timing.hrRoutingCompletedAt = timing.hrRoutingCompletedAt ?? performance.now()
       timing.hrVendorRequestStartedAt = performance.now()
@@ -328,8 +325,8 @@ export async function POST(request: NextRequest) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': upstreamApiKey,
-          'anthropic-version': '2023-06-01',
+          ...provider.authHeaders,
+          'anthropic-version': provider.anthropicVersion,
         },
         body: JSON.stringify(validatedBody),
       })
