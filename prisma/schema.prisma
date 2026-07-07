@@ -175,3 +175,22 @@ model ApiLatencyMetric {
   @@index([createdAt])
   @@map("api_latency_metrics")
 }
+
+
+model Provider {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  displayName   String
+  baseUrl       String
+  authMethod    String   // x-api-key, bearer, oauth, custom-header
+  authHeaderName String? // custom header name if authMethod=custom-header
+  authValue     String   // encrypted/stored API key or token value
+  isActive      Boolean  @default(true)
+  isDefault     Boolean  @default(false)
+  anthropicVersion String? @default("2023-06-01")
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("providers")
+}

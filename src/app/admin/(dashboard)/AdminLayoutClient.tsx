@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   BarChart3,
   ChevronRight,
+  Cloud,
   Home,
   Key,
   LayoutDashboard,
@@ -16,6 +17,7 @@ import { cn } from '@/lib/utils'
 const navItems = [
   { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
   { label: 'API Keys', href: '/admin/keys', icon: Key },
+  { label: 'Providers', href: '/admin/providers', icon: Cloud },
   { label: 'Usage', href: '/admin/usage', icon: BarChart3 },
   { label: 'Settings', href: '/admin/settings', icon: Settings },
 ]
