@@ -235,8 +235,19 @@ export async function POST(request: NextRequest) {
       "claude-haiku-4-5": "anthropic/claude-haiku-4-5",
     }
 
-    // Map model before forwarding
-    const upstreamBody = { ...validatedBody }
+    // Map model before forwarding — strip fields the upstream vendor may not support.
+    // Claude Code sends newer fields like `context_management` that some providers reject.
+    const KNOWN_ANTHROPIC_FIELDS = new Set([
+      'model', 'messages', 'max_tokens', 'stream', 'system', 'temperature',
+      'top_p', 'top_k', 'metadata', 'stop_sequences', 'tools', 'tool_choice',
+      'thinking', 'betas',
+    ])
+    const upstreamBody: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(validatedBody)) {
+      if (KNOWN_ANTHROPIC_FIELDS.has(key)) {
+        upstreamBody[key] = value
+      }
+    }
     const originalModel = validatedBody.model
     let mappedModel = originalModel
 
