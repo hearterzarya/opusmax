@@ -133,8 +133,10 @@ function convertAnthropicMessageToOpenAI(msg: AnthropicMessage): OpenAIMessage[]
       if (block.type === 'text' && block.text) {
         textParts.push(block.text)
       } else if (block.type === 'tool_use') {
+        // Convert toolu_ prefix back to call_ for OpenAI compatibility
+        const callId = block.id || `call_${Date.now().toString(36)}`
         toolCalls.push({
-          id: block.id || `call_${Date.now().toString(36)}`,
+          id: callId,
           type: 'function',
           function: {
             name: block.name || '',
@@ -245,9 +247,11 @@ export function openAIToAnthropicResponse(openaiResp: Record<string, unknown>): 
       } catch {
         input = { raw: call.function.arguments }
       }
+      // Claude Code expects 'toolu_' prefix on tool IDs
+      const toolId = call.id.startsWith('toolu_') ? call.id : `toolu_${call.id.replace('call_', '')}`
       content.push({
         type: 'tool_use',
-        id: call.id,
+        id: toolId,
         name: call.function.name,
         input,
       })
@@ -334,16 +338,14 @@ export function createOpenAIToAnthropicSSETransform(): TransformStream<Uint8Arra
     },
 
     flush(controller) {
-      if (currentToolCall) {
-        emit(controller, 'content_block_stop', { type: 'content_block_stop', index: contentBlockIndex })
-      }
-      if (sentMessageStart) {
-        emit(controller, 'message_delta', {
-          type: 'message_delta',
-          delta: { stop_reason: 'end_turn', stop_sequence: null },
-          usage: { output_tokens: outputTokens },
-        })
-        emit(controller, 'message_stop', { type: 'message_stop' })
+      // Only emit closing events if not already closed by [DONE] or finish_reason
+      if (sentMessageStart && !buffer.includes('[DONE]')) {
+        if (currentToolCall) {
+          emit(controller, 'content_block_stop', { type: 'content_block_stop', index: contentBlockIndex })
+        }
+        if (hasTextBlock && !currentToolCall) {
+          emit(controller, 'content_block_stop', { type: 'content_block_stop', index: contentBlockIndex })
+        }
       }
     },
   })
@@ -364,14 +366,14 @@ export function createOpenAIToAnthropicSSETransform(): TransformStream<Uint8Arra
       emit(controller, 'message_start', {
         type: 'message_start',
         message: {
-          id: chunk.id || `msg_${Date.now().toString(36)}`,
+          id: (chunk.id ? `msg_${String(chunk.id).replace('chatcmpl-', '')}` : `msg_${Date.now().toString(36)}`),
           type: 'message',
           role: 'assistant',
           content: [],
-          model: chunk.model || 'unknown',
+          model: String(chunk.model || 'unknown'),
           stop_reason: null,
           stop_sequence: null,
-          usage: { input_tokens: inputTokens, output_tokens: 0 },
+          usage: { input_tokens: inputTokens || 0, output_tokens: 0 },
         },
       })
     }
@@ -406,19 +408,16 @@ export function createOpenAIToAnthropicSSETransform(): TransformStream<Uint8Arra
             hasTextBlock = false
           }
           if (currentToolCall) {
-            // Finish previous tool call input
-            emit(controller, 'content_block_delta', {
-              type: 'content_block_delta', index: contentBlockIndex,
-              delta: { type: 'input_json_delta', partial_json: '' },
-            })
             emit(controller, 'content_block_stop', { type: 'content_block_stop', index: contentBlockIndex })
             contentBlockIndex++
           }
 
-          currentToolCall = { id: tc.id, name: tc.function.name, arguments: '' }
+          // Claude Code expects tool IDs with 'toolu_' prefix
+          const toolId = tc.id.startsWith('toolu_') ? tc.id : `toolu_${tc.id.replace('call_', '')}`
+          currentToolCall = { id: toolId, name: tc.function.name, arguments: '' }
           emit(controller, 'content_block_start', {
             type: 'content_block_start', index: contentBlockIndex,
-            content_block: { type: 'tool_use', id: tc.id, name: tc.function.name, input: {} },
+            content_block: { type: 'tool_use', id: toolId, name: tc.function.name, input: {} },
           })
         }
 
