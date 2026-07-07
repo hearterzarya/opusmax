@@ -9,6 +9,7 @@ import { upstreamFetch } from '@/lib/upstream-fetch'
 import { createTimingContext, isFirstTextToken } from '@/lib/latency-timing'
 import { persistLatencyMetric } from '@/lib/latency-persist'
 import { resolveAllProviders } from '@/lib/provider-resolver'
+import { anthropicToOpenAIRequest, openAIToAnthropicResponse, createOpenAIToAnthropicSSETransform } from '@/lib/format-converter'
 import { z } from 'zod'
 
 import type { ResolvedProvider } from '@/lib/provider-resolver'
@@ -284,19 +285,29 @@ export async function POST(request: NextRequest) {
     }
 
     let lastError: string | null = null
+    let usedProviderFormat: 'anthropic' | 'openai' = 'anthropic'
     for (const provider of allProviders) {
       const providerStartMs = Date.now()
       try {
         const resolvedUrl = `${provider.baseUrl}${provider.messagesPath}`
-        const bodyForProvider = { ...upstreamBody, model: originalModel }
 
-        // Build headers — only include anthropic-version for Anthropic-compatible providers
+        // Prepare body based on provider format
+        let bodyForProvider: Record<string, unknown>
+        const modelName = provider.modelOverride || originalModel
+
+        if (provider.format === 'openai') {
+          // Convert Anthropic request → OpenAI format
+          bodyForProvider = anthropicToOpenAIRequest({ ...upstreamBody, model: modelName })
+        } else {
+          bodyForProvider = { ...upstreamBody, model: modelName }
+        }
+
+        // Build headers
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
           ...provider.authHeaders,
         }
-        // Add anthropic-version header only if the provider has it configured (non-empty)
-        if (provider.anthropicVersion && provider.anthropicVersion !== 'none') {
+        if (provider.format === 'anthropic' && provider.anthropicVersion && provider.anthropicVersion !== 'none') {
           headers['anthropic-version'] = provider.anthropicVersion
         }
 
@@ -335,6 +346,7 @@ export async function POST(request: NextRequest) {
 
         // Success — use this response
         upstreamResponse = response
+        usedProviderFormat = provider.format
         timing.returnedModel = originalModel
         logProviderAttempt(timing.requestId, key.id, undefined, originalModel, provider, 'SUCCESS', response.status, null, providerLatency, true)
         break
@@ -359,6 +371,29 @@ export async function POST(request: NextRequest) {
 
     // Streaming branch: proxy SSE while observing usage events to settle quota.
     if (validatedBody.stream && upstreamResponse.body) {
+      // If provider uses OpenAI format, transform the SSE stream back to Anthropic format
+      if (usedProviderFormat === 'openai') {
+        const transform = createOpenAIToAnthropicSSETransform()
+        const transformedStream = upstreamResponse.body.pipeThrough(transform)
+
+        timing.hrOpusxResponseCompletedAt = performance.now()
+        timing.statusCode = upstreamResponse.status
+        timing.success = true
+        persistLatencyMetric(timing)
+
+        const latencyMs = Date.now() - startTime
+        prisma.usageLog.create({
+          data: { apiKeyId: key.id, model: originalModel, inputTokens: tokens.raw, outputTokens: 0, totalTokens: tokens.raw, latencyMs, statusCode: 200 },
+        }).catch(() => {})
+        prisma.apiKey.update({ where: { id: key.id }, data: { lastUsedAt: new Date() } }).catch(() => {})
+
+        return new Response(transformedStream, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+        })
+      }
+
+      // Standard Anthropic SSE passthrough
       const reader = upstreamResponse.body.getReader()
       const decoder = new TextDecoder()
       let sseBuffer = ''
@@ -501,6 +536,11 @@ export async function POST(request: NextRequest) {
       } catch {
         responseData = { text: textBody }
       }
+    }
+
+    // If response came from an OpenAI-format provider, convert to Anthropic format
+    if (usedProviderFormat === 'openai' && responseData && typeof responseData === 'object') {
+      responseData = openAIToAnthropicResponse(responseData as Record<string, unknown>)
     }
 
     const usage =

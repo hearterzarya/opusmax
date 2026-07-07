@@ -193,6 +193,8 @@ function ProviderFormModal({ open, onClose, onSaved, mode, provider }: {
   const [displayName, setDisplayName] = useState(provider?.displayName ?? '')
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? '')
   const [messagesPath, setMessagesPath] = useState((provider as any)?.messagesPath ?? '/v1/messages')
+  const [format, setFormat] = useState((provider as any)?.format ?? 'anthropic')
+  const [modelOverride, setModelOverride] = useState((provider as any)?.modelOverride ?? '')
   const [authMethod, setAuthMethod] = useState(provider?.authMethod ?? 'x-api-key')
   const [authHeaderName, setAuthHeaderName] = useState(provider?.authHeaderName ?? '')
   const [authValue, setAuthValue] = useState('')
@@ -217,7 +219,7 @@ function ProviderFormModal({ open, onClose, onSaved, mode, provider }: {
     setSaving(true)
     try {
       const body: Record<string, unknown> = {
-        displayName, baseUrl, messagesPath, authMethod, isDefault, anthropicVersion: anthropicVersion || null, notes: notes || null,
+        displayName, baseUrl, messagesPath, format, modelOverride: modelOverride || null, authMethod, isDefault, anthropicVersion: anthropicVersion || null, notes: notes || null,
         authHeaderName: authMethod === 'custom-header' ? authHeaderName : null,
       }
       if (mode === 'add') {
@@ -262,6 +264,19 @@ function ProviderFormModal({ open, onClose, onSaved, mode, provider }: {
         <Field label="Display Name" value={displayName} onChange={setDisplayName} placeholder="Anthropic Direct" />
         <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} placeholder="https://api.anthropic.com" mono />
         <Field label="Messages Path" value={messagesPath} onChange={setMessagesPath} placeholder="/v1/messages" mono />
+
+        <div>
+          <label className="text-xs font-medium uppercase tracking-[0.16em] text-white/55">API Format</label>
+          <select value={format} onChange={(e) => setFormat(e.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white focus:border-fuchsia-400/50 focus:outline-none">
+            <option value="anthropic">Anthropic (Claude API format)</option>
+            <option value="openai">OpenAI (GPT/MiniMax/Together format)</option>
+          </select>
+          <p className="mt-1 text-[10px] text-white/40">
+            {format === 'openai' ? 'Request will be auto-converted from Anthropic → OpenAI format' : 'Standard Anthropic /v1/messages format'}
+          </p>
+        </div>
+
+        <Field label="Model Override (optional)" value={modelOverride} onChange={setModelOverride} placeholder="e.g. minimax-01 (leave empty to use original model)" mono />
 
         <div>
           <label className="text-xs font-medium uppercase tracking-[0.16em] text-white/55">Auth Method</label>

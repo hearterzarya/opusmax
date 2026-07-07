@@ -9,6 +9,8 @@ const updateProviderSchema = z.object({
   displayName: z.string().trim().min(1).max(100).optional(),
   baseUrl: z.string().url().trim().optional(),
   messagesPath: z.string().trim().max(200).optional(),
+  format: z.enum(['anthropic', 'openai']).optional(),
+  modelOverride: z.string().trim().max(100).optional().nullable(),
   authMethod: z.enum(['x-api-key', 'bearer', 'oauth', 'custom-header']).optional(),
   authHeaderName: z.string().trim().max(100).optional().nullable(),
   authValue: z.string().trim().min(1).optional(),
@@ -53,6 +55,8 @@ export async function PATCH(
     if (data.displayName !== undefined) sets.push(`"displayName" = '${data.displayName.replace(/'/g, "''")}'`)
     if (data.baseUrl !== undefined) sets.push(`"baseUrl" = '${data.baseUrl.replace(/'/g, "''")}'`)
     if (data.messagesPath !== undefined) sets.push(`"messagesPath" = '${data.messagesPath.replace(/'/g, "''")}'`)
+    if (data.format !== undefined) sets.push(`"format" = '${data.format}'`)
+    if (data.modelOverride !== undefined) sets.push(`"modelOverride" = ${data.modelOverride ? `'${data.modelOverride.replace(/'/g, "''")}'` : 'NULL'}`)
     if (data.authMethod !== undefined) sets.push(`"authMethod" = '${data.authMethod}'`)
     if (data.authHeaderName !== undefined) sets.push(`"authHeaderName" = ${data.authHeaderName ? `'${data.authHeaderName.replace(/'/g, "''")}'` : 'NULL'}`)
     if (data.authValue !== undefined) sets.push(`"authValue" = '${data.authValue.replace(/'/g, "''")}'`)

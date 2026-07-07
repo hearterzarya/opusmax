@@ -183,6 +183,8 @@ model Provider {
   displayName   String
   baseUrl       String
   messagesPath  String   @default("/v1/messages")
+  format        String   @default("anthropic") // anthropic | openai
+  modelOverride String?  // override model name for this provider (e.g., minimax-01)
   authMethod    String   // x-api-key, bearer, oauth, custom-header
   authHeaderName String? // custom header name if authMethod=custom-header
   authValue     String   // encrypted/stored API key or token value

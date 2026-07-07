@@ -19,6 +19,8 @@ export interface ResolvedProvider {
   displayName: string
   baseUrl: string
   messagesPath: string
+  format: 'anthropic' | 'openai'
+  modelOverride: string | null
   authHeaders: Record<string, string>
   anthropicVersion: string
 }
@@ -29,6 +31,8 @@ interface ProviderRow {
   displayName: string
   baseUrl: string
   messagesPath: string | null
+  format: string | null
+  modelOverride: string | null
   authMethod: string
   authHeaderName: string | null
   authValue: string
@@ -56,7 +60,7 @@ export async function resolveAllProviders(): Promise<ResolvedProvider[]> {
 
   try {
     const providers = await prisma.$queryRaw<ProviderRow[]>`
-      SELECT "id", "name", "displayName", "baseUrl", "messagesPath", "authMethod", "authHeaderName", "authValue", "anthropicVersion"
+      SELECT "id", "name", "displayName", "baseUrl", "messagesPath", "format", "modelOverride", "authMethod", "authHeaderName", "authValue", "anthropicVersion"
       FROM "providers"
       WHERE "isActive" = true
       ORDER BY "isDefault" DESC, "createdAt" ASC
@@ -68,6 +72,8 @@ export async function resolveAllProviders(): Promise<ResolvedProvider[]> {
         displayName: p.displayName,
         baseUrl: p.baseUrl.replace(/\/+$/, ''),
         messagesPath: p.messagesPath || '/v1/messages',
+        format: (p.format === 'openai' ? 'openai' : 'anthropic') as 'anthropic' | 'openai',
+        modelOverride: p.modelOverride || null,
         authHeaders: buildAuthHeaders(p.authMethod, p.authValue, p.authHeaderName),
         anthropicVersion: p.anthropicVersion || '2023-06-01',
       })
@@ -118,6 +124,8 @@ function resolveFromEnv(): ResolvedProvider | null {
     displayName: 'Environment Config',
     baseUrl,
     messagesPath: '/v1/messages',
+    format: 'anthropic' as const,
+    modelOverride: null,
     authHeaders,
     anthropicVersion: '2023-06-01',
   }

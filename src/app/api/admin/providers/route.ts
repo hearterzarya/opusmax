@@ -10,6 +10,8 @@ const createProviderSchema = z.object({
   displayName: z.string().trim().min(1).max(100),
   baseUrl: z.string().url().trim(),
   messagesPath: z.string().trim().max(200).optional().default('/v1/messages'),
+  format: z.enum(['anthropic', 'openai']).optional().default('anthropic'),
+  modelOverride: z.string().trim().max(100).optional().nullable(),
   authMethod: z.enum(['x-api-key', 'bearer', 'oauth', 'custom-header']),
   authHeaderName: z.string().trim().max(100).optional().nullable(),
   authValue: z.string().trim().min(1),
@@ -66,9 +68,9 @@ export async function POST(request: NextRequest) {
 
     const now = new Date()
     const provider = await prisma.$queryRaw<Array<Record<string, unknown>>>`
-      INSERT INTO "providers" ("id", "name", "displayName", "baseUrl", "messagesPath", "authMethod", "authHeaderName", "authValue", "isActive", "isDefault", "anthropicVersion", "notes", "createdAt", "updatedAt")
-      VALUES (${`prov_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`}, ${data.name}, ${data.displayName}, ${data.baseUrl}, ${data.messagesPath}, ${data.authMethod}, ${data.authHeaderName ?? null}, ${data.authValue}, ${data.isActive}, ${data.isDefault}, ${data.anthropicVersion ?? '2023-06-01'}, ${data.notes ?? null}, ${now}, ${now})
-      RETURNING "id", "name", "displayName", "baseUrl", "messagesPath", "authMethod", "isActive", "isDefault", "createdAt"
+      INSERT INTO "providers" ("id", "name", "displayName", "baseUrl", "messagesPath", "format", "modelOverride", "authMethod", "authHeaderName", "authValue", "isActive", "isDefault", "anthropicVersion", "notes", "createdAt", "updatedAt")
+      VALUES (${`prov_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`}, ${data.name}, ${data.displayName}, ${data.baseUrl}, ${data.messagesPath}, ${data.format}, ${data.modelOverride ?? null}, ${data.authMethod}, ${data.authHeaderName ?? null}, ${data.authValue}, ${data.isActive}, ${data.isDefault}, ${data.anthropicVersion ?? '2023-06-01'}, ${data.notes ?? null}, ${now}, ${now})
+      RETURNING "id", "name", "displayName", "baseUrl", "messagesPath", "format", "authMethod", "isActive", "isDefault", "createdAt"
     `
 
     return NextResponse.json({ success: true, provider: provider[0] })
