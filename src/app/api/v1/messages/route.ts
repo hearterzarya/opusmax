@@ -287,24 +287,29 @@ export async function POST(request: NextRequest) {
       const providerStartMs = Date.now()
       try {
         const resolvedUrl = `${provider.baseUrl}${provider.messagesPath}`
-        // Use the original model for the request body (don't prefix with anthropic/ for non-Anthropic providers)
         const bodyForProvider = { ...upstreamBody, model: originalModel }
+
+        // Build headers — only include anthropic-version for Anthropic-compatible providers
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          ...provider.authHeaders,
+        }
+        // Add anthropic-version header only if the provider has it configured (non-empty)
+        if (provider.anthropicVersion && provider.anthropicVersion !== 'none') {
+          headers['anthropic-version'] = provider.anthropicVersion
+        }
 
         timing.hrVendorRequestStartedAt = performance.now()
         const response = await upstreamFetch(resolvedUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...provider.authHeaders,
-            'anthropic-version': provider.anthropicVersion,
-          },
+          headers,
           body: JSON.stringify(bodyForProvider),
           signal: AbortSignal.timeout(60000),
         } as RequestInit)
         timing.hrVendorResponseHeadersAt = performance.now()
         const providerLatency = Date.now() - providerStartMs
 
-        // If we got a client error (400/401/403), try next provider
+        // If we got a client error (400/401/403/404), try next provider
         if (response.status >= 400 && response.status < 500) {
           let errorMsg = `${response.status}`
           try {
