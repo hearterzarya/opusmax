@@ -286,7 +286,7 @@ export async function POST(request: NextRequest) {
     for (const provider of allProviders) {
       const providerStartMs = Date.now()
       try {
-        const resolvedUrl = `${provider.baseUrl}/v1/messages`
+        const resolvedUrl = `${provider.baseUrl}${provider.messagesPath}`
         // Use the original model for the request body (don't prefix with anthropic/ for non-Anthropic providers)
         const bodyForProvider = { ...upstreamBody, model: originalModel }
 

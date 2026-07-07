@@ -18,6 +18,7 @@ export interface ResolvedProvider {
   name: string
   displayName: string
   baseUrl: string
+  messagesPath: string
   authHeaders: Record<string, string>
   anthropicVersion: string
 }
@@ -27,6 +28,7 @@ interface ProviderRow {
   name: string
   displayName: string
   baseUrl: string
+  messagesPath: string | null
   authMethod: string
   authHeaderName: string | null
   authValue: string
@@ -54,7 +56,7 @@ export async function resolveAllProviders(): Promise<ResolvedProvider[]> {
 
   try {
     const providers = await prisma.$queryRaw<ProviderRow[]>`
-      SELECT "id", "name", "displayName", "baseUrl", "authMethod", "authHeaderName", "authValue", "anthropicVersion"
+      SELECT "id", "name", "displayName", "baseUrl", "messagesPath", "authMethod", "authHeaderName", "authValue", "anthropicVersion"
       FROM "providers"
       WHERE "isActive" = true
       ORDER BY "isDefault" DESC, "createdAt" ASC
@@ -65,6 +67,7 @@ export async function resolveAllProviders(): Promise<ResolvedProvider[]> {
         name: p.name,
         displayName: p.displayName,
         baseUrl: p.baseUrl.replace(/\/+$/, ''),
+        messagesPath: p.messagesPath || '/v1/messages',
         authHeaders: buildAuthHeaders(p.authMethod, p.authValue, p.authHeaderName),
         anthropicVersion: p.anthropicVersion || '2023-06-01',
       })
@@ -114,6 +117,7 @@ function resolveFromEnv(): ResolvedProvider | null {
     name: 'env-default',
     displayName: 'Environment Config',
     baseUrl,
+    messagesPath: '/v1/messages',
     authHeaders,
     anthropicVersion: '2023-06-01',
   }

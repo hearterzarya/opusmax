@@ -192,6 +192,7 @@ function ProviderFormModal({ open, onClose, onSaved, mode, provider }: {
   const [name, setName] = useState(provider?.name ?? '')
   const [displayName, setDisplayName] = useState(provider?.displayName ?? '')
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? '')
+  const [messagesPath, setMessagesPath] = useState((provider as any)?.messagesPath ?? '/v1/messages')
   const [authMethod, setAuthMethod] = useState(provider?.authMethod ?? 'x-api-key')
   const [authHeaderName, setAuthHeaderName] = useState(provider?.authHeaderName ?? '')
   const [authValue, setAuthValue] = useState('')
@@ -216,7 +217,7 @@ function ProviderFormModal({ open, onClose, onSaved, mode, provider }: {
     setSaving(true)
     try {
       const body: Record<string, unknown> = {
-        displayName, baseUrl, authMethod, isDefault, anthropicVersion: anthropicVersion || null, notes: notes || null,
+        displayName, baseUrl, messagesPath, authMethod, isDefault, anthropicVersion: anthropicVersion || null, notes: notes || null,
         authHeaderName: authMethod === 'custom-header' ? authHeaderName : null,
       }
       if (mode === 'add') {
@@ -260,6 +261,7 @@ function ProviderFormModal({ open, onClose, onSaved, mode, provider }: {
         <Field label="Slug (unique ID)" value={name} onChange={setName} placeholder="anthropic-direct" disabled={mode === 'edit'} mono />
         <Field label="Display Name" value={displayName} onChange={setDisplayName} placeholder="Anthropic Direct" />
         <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} placeholder="https://api.anthropic.com" mono />
+        <Field label="Messages Path" value={messagesPath} onChange={setMessagesPath} placeholder="/v1/messages" mono />
 
         <div>
           <label className="text-xs font-medium uppercase tracking-[0.16em] text-white/55">Auth Method</label>

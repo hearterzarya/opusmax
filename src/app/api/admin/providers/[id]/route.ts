@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma'
 const updateProviderSchema = z.object({
   displayName: z.string().trim().min(1).max(100).optional(),
   baseUrl: z.string().url().trim().optional(),
+  messagesPath: z.string().trim().max(200).optional(),
   authMethod: z.enum(['x-api-key', 'bearer', 'oauth', 'custom-header']).optional(),
   authHeaderName: z.string().trim().max(100).optional().nullable(),
   authValue: z.string().trim().min(1).optional(),
@@ -51,6 +52,7 @@ export async function PATCH(
 
     if (data.displayName !== undefined) sets.push(`"displayName" = '${data.displayName.replace(/'/g, "''")}'`)
     if (data.baseUrl !== undefined) sets.push(`"baseUrl" = '${data.baseUrl.replace(/'/g, "''")}'`)
+    if (data.messagesPath !== undefined) sets.push(`"messagesPath" = '${data.messagesPath.replace(/'/g, "''")}'`)
     if (data.authMethod !== undefined) sets.push(`"authMethod" = '${data.authMethod}'`)
     if (data.authHeaderName !== undefined) sets.push(`"authHeaderName" = ${data.authHeaderName ? `'${data.authHeaderName.replace(/'/g, "''")}'` : 'NULL'}`)
     if (data.authValue !== undefined) sets.push(`"authValue" = '${data.authValue.replace(/'/g, "''")}'`)
