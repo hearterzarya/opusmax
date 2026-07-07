@@ -250,12 +250,13 @@ export async function POST(request: NextRequest) {
     // Each provider accepts the model as-is; if a provider doesn't support it,
     // the fallback chain will try the next provider automatically.
 
-    // Map model before forwarding — strip fields the upstream vendor may not support.
-    // Claude Code sends newer fields like `context_management` that some providers reject.
+    // Strip ALL fields not in the official Anthropic API spec.
+    // Claude Code sends newer/experimental fields (context_management, mcpServers, etc.)
+    // that cause 400 errors on providers that strictly validate.
     const KNOWN_ANTHROPIC_FIELDS = new Set([
       'model', 'messages', 'max_tokens', 'stream', 'system', 'temperature',
       'top_p', 'top_k', 'metadata', 'stop_sequences', 'tools', 'tool_choice',
-      'thinking', 'betas',
+      'thinking', 'betas', 'top_level_thinking',
     ])
     const upstreamBody: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(validatedBody)) {
@@ -314,9 +315,10 @@ export async function POST(request: NextRequest) {
           let errorMsg = `${response.status}`
           try {
             const errBody = await response.text()
-            errorMsg = errBody.slice(0, 200)
+            errorMsg = errBody.slice(0, 500)
           } catch {}
-          console.warn(`[fallback] Provider "${provider.name}" returned ${response.status}: ${errorMsg.slice(0, 100)}`)
+          console.warn(`[fallback] Provider "${provider.name}" returned ${response.status}: ${errorMsg.slice(0, 200)}`)
+          console.warn(`[fallback] Request body keys sent:`, Object.keys(bodyForProvider).join(', '))
           lastError = `${provider.name}: ${errorMsg}`
           // Log failure
           logProviderAttempt(timing.requestId, key.id, key.rpmLimit ? undefined : undefined, originalModel, provider, 'FAILED_4XX', response.status, errorMsg.slice(0, 300), providerLatency, false)
@@ -350,7 +352,7 @@ export async function POST(request: NextRequest) {
     if (!upstreamResponse) {
       return createErrorResponse(
         ErrorCodes.UPSTREAM_ERROR,
-        `All providers failed. Last error: ${lastError || 'Unknown'}`,
+        `All providers failed. Last error: ${lastError?.slice(0, 500) || 'Unknown'}`,
         502
       )
     }
