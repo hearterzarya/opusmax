@@ -9,6 +9,7 @@ import {
   Home,
   Key,
   LayoutDashboard,
+  List,
   LogOut,
   Settings,
 } from 'lucide-react'
@@ -18,6 +19,7 @@ const navItems = [
   { label: 'Dashboard', href: '/admin', icon: LayoutDashboard },
   { label: 'API Keys', href: '/admin/keys', icon: Key },
   { label: 'Providers', href: '/admin/providers', icon: Cloud },
+  { label: 'Provider Logs', href: '/admin/provider-logs', icon: List },
   { label: 'Usage', href: '/admin/usage', icon: BarChart3 },
   { label: 'Settings', href: '/admin/settings', icon: Settings },
 ]

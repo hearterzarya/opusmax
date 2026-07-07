@@ -194,3 +194,26 @@ model Provider {
 
   @@map("providers")
 }
+
+
+model ProviderLog {
+  id            String   @id @default(cuid())
+  requestId     String
+  apiKeyId      String?
+  apiKeyName    String?
+  model         String
+  providerName  String
+  providerUrl   String
+  status        String   // SUCCESS, FAILED_4XX, FAILED_5XX, FAILED_NETWORK, FAILED_TIMEOUT
+  statusCode    Int?
+  errorMessage  String?
+  latencyMs     Int?
+  isFinal       Boolean  @default(false) // true = this provider served the response
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([providerName, createdAt])
+  @@index([apiKeyId, createdAt])
+  @@index([status, createdAt])
+  @@map("provider_logs")
+}

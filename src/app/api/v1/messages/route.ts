@@ -11,6 +11,27 @@ import { persistLatencyMetric } from '@/lib/latency-persist'
 import { resolveAllProviders } from '@/lib/provider-resolver'
 import { z } from 'zod'
 
+import type { ResolvedProvider } from '@/lib/provider-resolver'
+
+/** Fire-and-forget provider routing log */
+function logProviderAttempt(
+  requestId: string,
+  apiKeyId: string,
+  _apiKeyName: string | undefined,
+  model: string,
+  provider: ResolvedProvider,
+  status: string,
+  statusCode: number | null,
+  errorMessage: string | null,
+  latencyMs: number,
+  isFinal: boolean
+): void {
+  prisma.$executeRaw`
+    INSERT INTO "provider_logs" ("id", "requestId", "apiKeyId", "apiKeyName", "model", "providerName", "providerUrl", "status", "statusCode", "errorMessage", "latencyMs", "isFinal", "createdAt")
+    VALUES (${`pl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`}, ${requestId}, ${apiKeyId}, ${null}, ${model}, ${provider.name}, ${provider.baseUrl}, ${status}, ${statusCode}, ${errorMessage}, ${Math.round(latencyMs)}, ${isFinal}, NOW())
+  `.catch((err) => console.error('[provider-log] Write failed:', (err as Error).message?.slice(0, 100)))
+}
+
 const messageSchema = z
   .object({
     model: z.string().min(1),
@@ -263,6 +284,7 @@ export async function POST(request: NextRequest) {
 
     let lastError: string | null = null
     for (const provider of allProviders) {
+      const providerStartMs = Date.now()
       try {
         const resolvedUrl = `${provider.baseUrl}/v1/messages`
         // Use the original model for the request body (don't prefix with anthropic/ for non-Anthropic providers)
@@ -280,6 +302,7 @@ export async function POST(request: NextRequest) {
           signal: AbortSignal.timeout(60000),
         } as RequestInit)
         timing.hrVendorResponseHeadersAt = performance.now()
+        const providerLatency = Date.now() - providerStartMs
 
         // If we got a client error (400/401/403), try next provider
         if (response.status >= 400 && response.status < 500) {
@@ -290,6 +313,8 @@ export async function POST(request: NextRequest) {
           } catch {}
           console.warn(`[fallback] Provider "${provider.name}" returned ${response.status}: ${errorMsg.slice(0, 100)}`)
           lastError = `${provider.name}: ${errorMsg}`
+          // Log failure
+          logProviderAttempt(timing.requestId, key.id, key.rpmLimit ? undefined : undefined, originalModel, provider, 'FAILED_4XX', response.status, errorMsg.slice(0, 300), providerLatency, false)
           continue
         }
 
@@ -297,18 +322,22 @@ export async function POST(request: NextRequest) {
         if (response.status >= 500) {
           console.warn(`[fallback] Provider "${provider.name}" returned ${response.status}`)
           lastError = `${provider.name}: ${response.status}`
+          logProviderAttempt(timing.requestId, key.id, undefined, originalModel, provider, 'FAILED_5XX', response.status, null, providerLatency, false)
           continue
         }
 
         // Success — use this response
         upstreamResponse = response
         timing.returnedModel = originalModel
-        console.log(`[provider] Using "${provider.name}" (${provider.baseUrl})`)
+        logProviderAttempt(timing.requestId, key.id, undefined, originalModel, provider, 'SUCCESS', response.status, null, providerLatency, true)
         break
       } catch (err) {
-        // Network error / timeout — try next provider
-        console.warn(`[fallback] Provider "${provider.name}" failed:`, (err as Error).message?.slice(0, 100))
-        lastError = `${provider.name}: ${(err as Error).message?.slice(0, 100)}`
+        const providerLatency = Date.now() - providerStartMs
+        const errMsg = (err as Error).message?.slice(0, 200) || 'Unknown'
+        const status = errMsg.includes('timeout') ? 'FAILED_TIMEOUT' : 'FAILED_NETWORK'
+        console.warn(`[fallback] Provider "${provider.name}" failed:`, errMsg.slice(0, 100))
+        lastError = `${provider.name}: ${errMsg}`
+        logProviderAttempt(timing.requestId, key.id, undefined, originalModel, provider, status, null, errMsg, providerLatency, false)
         continue
       }
     }
