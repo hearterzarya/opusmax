@@ -5,12 +5,10 @@ import { ErrorCodes, createErrorResponse } from '@/lib/apikey'
 import { validateActiveApiKeyFromRequest } from '@/lib/api-key-auth'
 import { checkRateLimit } from '@/lib/redis'
 import { QUOTA_WINDOW_SECONDS, reserveRollingWindowQuota, settleRollingWindowQuota } from '@/lib/quota'
-import { upstreamMessagesUrl } from '@/lib/upstream-anthropic'
-import { getUpstreamApiKey, upstreamFetch } from '@/lib/upstream-fetch'
-import { forwardAnthropicMessages, checkBifrostConnection } from '@/lib/bifrost'
+import { upstreamFetch } from '@/lib/upstream-fetch'
 import { createTimingContext, isFirstTextToken } from '@/lib/latency-timing'
 import { persistLatencyMetric } from '@/lib/latency-persist'
-import { resolveProvider } from '@/lib/provider-resolver'
+import { resolveAllProviders } from '@/lib/provider-resolver'
 import { z } from 'zod'
 
 const messageSchema = z
@@ -225,15 +223,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Forward upstream
-    let upstreamResponse: Response
     timing.hrRoutingStartedAt = performance.now()
 
-    // Model mapping for Bifrost
-    const MODEL_MAP: Record<string, string> = {
-      "claude-opus-4-8": "anthropic/claude-opus-4-8",
-      "claude-sonnet-4-5": "anthropic/claude-sonnet-4-5",
-      "claude-haiku-4-5": "anthropic/claude-haiku-4-5",
-    }
+    // Model mapping — keep the original model name (no prefixing)
+    // Each provider accepts the model as-is; if a provider doesn't support it,
+    // the fallback chain will try the next provider automatically.
 
     // Map model before forwarding — strip fields the upstream vendor may not support.
     // Claude Code sends newer fields like `context_management` that some providers reject.
@@ -249,105 +243,86 @@ export async function POST(request: NextRequest) {
       }
     }
     const originalModel = validatedBody.model
-    let mappedModel = originalModel
 
-    if (originalModel.startsWith('anthropic/')) {
-      mappedModel = originalModel
-    } else if (MODEL_MAP[originalModel]) {
-      mappedModel = MODEL_MAP[originalModel]
-    } else {
-      mappedModel = `anthropic/${originalModel}`
+    // ─── PROVIDER FALLBACK CHAIN ───
+    // Try each active provider in order (default first). If one fails with
+    // 4xx/5xx or network error, automatically try the next provider.
+    // This ensures the user never sees an error if any provider is available.
+    timing.hrRoutingCompletedAt = performance.now()
+
+    let upstreamResponse: Response | null = null
+    const allProviders = await resolveAllProviders()
+
+    if (allProviders.length === 0) {
+      return createErrorResponse(
+        ErrorCodes.UPSTREAM_ERROR,
+        'No upstream provider configured. Add a provider in Admin → Providers, or set ANTHROPIC_API_KEY.',
+        500
+      )
     }
 
-    upstreamBody.model = mappedModel
-
-    // Temporary safe log (no secrets)
-    console.log('[Bifrost] Incoming model:', originalModel, '| Mapped model:', mappedModel)
-
-    // Check if Bifrost is configured and available
-    const bifrostBaseUrl = process.env.BIFROST_BASE_URL
-    const bifrostUrlPath = bifrostBaseUrl ? `${bifrostBaseUrl}/anthropic/v1/messages` : null
-
-    console.log('[Bifrost] URL path:', bifrostUrlPath)
-
-    if (bifrostBaseUrl) {
+    let lastError: string | null = null
+    for (const provider of allProviders) {
       try {
-        // First check Bifrost connection
-        const bifrostCheck = await checkBifrostConnection()
-        if (!bifrostCheck.available) {
-          throw new Error(`Bifrost not available: ${bifrostCheck.error}`)
-        }
+        const resolvedUrl = `${provider.baseUrl}/v1/messages`
+        // Use the original model for the request body (don't prefix with anthropic/ for non-Anthropic providers)
+        const bodyForProvider = { ...upstreamBody, model: originalModel }
 
-        // Forward to Bifrost with mapped model and WITHOUT customer API key
-        if (!process.env.BIFROST_INTERNAL_KEY) {
-          throw new Error('Server misconfigured: BIFROST_INTERNAL_KEY is missing')
-        }
-        timing.hrRoutingCompletedAt = performance.now()
         timing.hrVendorRequestStartedAt = performance.now()
-        upstreamResponse = await forwardAnthropicMessages(upstreamBody, {
-          bifrostBaseUrl,
-          bifrostApiKey: process.env.BIFROST_INTERNAL_KEY,
-          timeout: 30000, // 30 second timeout
-        })
-        timing.hrVendorResponseHeadersAt = performance.now()
-        timing.returnedModel = mappedModel
-      } catch (bifrostError) {
-        // Fallback to direct upstream via dynamic provider
-        console.warn('Bifrost failed, falling back to direct upstream:', bifrostError)
-        const provider = await resolveProvider()
-        if (!provider) {
-          return createErrorResponse(
-            ErrorCodes.UPSTREAM_ERROR,
-            'No upstream provider configured. Add a provider in Admin → Providers.',
-            500
-          )
-        }
-
-        const resolvedMessagesUrl = `${provider.baseUrl}/v1/messages`
-        timing.hrRoutingCompletedAt = timing.hrRoutingCompletedAt ?? performance.now()
-        timing.hrVendorRequestStartedAt = performance.now()
-        upstreamResponse = await upstreamFetch(resolvedMessagesUrl, {
+        const response = await upstreamFetch(resolvedUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             ...provider.authHeaders,
             'anthropic-version': provider.anthropicVersion,
           },
-          body: JSON.stringify(validatedBody),
-        })
+          body: JSON.stringify(bodyForProvider),
+          signal: AbortSignal.timeout(60000),
+        } as RequestInit)
         timing.hrVendorResponseHeadersAt = performance.now()
-        timing.returnedModel = validatedBody.model
-      }
-    } else {
-      // Use direct upstream via dynamic provider (no Bifrost configured)
-      const provider = await resolveProvider()
-      if (!provider) {
-        return createErrorResponse(
-          ErrorCodes.UPSTREAM_ERROR,
-          'No upstream provider configured. Add a provider in Admin → Providers, or set ANTHROPIC_API_KEY in environment.',
-          500
-        )
-      }
-      const resolvedMessagesUrl = `${provider.baseUrl}/v1/messages`
 
-      timing.hrRoutingCompletedAt = timing.hrRoutingCompletedAt ?? performance.now()
-      timing.hrVendorRequestStartedAt = performance.now()
-      upstreamResponse = await upstreamFetch(resolvedMessagesUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...provider.authHeaders,
-          'anthropic-version': provider.anthropicVersion,
-        },
-        body: JSON.stringify(validatedBody),
-      })
-      timing.hrVendorResponseHeadersAt = performance.now()
-      timing.returnedModel = validatedBody.model
+        // If we got a client error (400/401/403), try next provider
+        if (response.status >= 400 && response.status < 500) {
+          let errorMsg = `${response.status}`
+          try {
+            const errBody = await response.text()
+            errorMsg = errBody.slice(0, 200)
+          } catch {}
+          console.warn(`[fallback] Provider "${provider.name}" returned ${response.status}: ${errorMsg.slice(0, 100)}`)
+          lastError = `${provider.name}: ${errorMsg}`
+          continue
+        }
+
+        // If we got a server error (500+), try next provider
+        if (response.status >= 500) {
+          console.warn(`[fallback] Provider "${provider.name}" returned ${response.status}`)
+          lastError = `${provider.name}: ${response.status}`
+          continue
+        }
+
+        // Success — use this response
+        upstreamResponse = response
+        timing.returnedModel = originalModel
+        console.log(`[provider] Using "${provider.name}" (${provider.baseUrl})`)
+        break
+      } catch (err) {
+        // Network error / timeout — try next provider
+        console.warn(`[fallback] Provider "${provider.name}" failed:`, (err as Error).message?.slice(0, 100))
+        lastError = `${provider.name}: ${(err as Error).message?.slice(0, 100)}`
+        continue
+      }
+    }
+
+    if (!upstreamResponse) {
+      return createErrorResponse(
+        ErrorCodes.UPSTREAM_ERROR,
+        `All providers failed. Last error: ${lastError || 'Unknown'}`,
+        502
+      )
     }
 
     // Streaming branch: proxy SSE while observing usage events to settle quota.
     if (validatedBody.stream && upstreamResponse.body) {
-      const bifrostBaseUrl = process.env.BIFROST_BASE_URL
       const reader = upstreamResponse.body.getReader()
       const decoder = new TextDecoder()
       let sseBuffer = ''
@@ -441,8 +416,8 @@ export async function POST(request: NextRequest) {
           try {
             const { done, value } = await reader.read()
             if (done) {
-              const provider = bifrostBaseUrl ? 'bifrost' : 'direct'
-              finalizeStreamingMetrics(upstreamResponse.status, provider)
+              const providerLabel = 'direct'
+              finalizeStreamingMetrics(upstreamResponse.status, providerLabel)
               controller.close()
               return
             }
@@ -455,14 +430,14 @@ export async function POST(request: NextRequest) {
               controller.enqueue(value)
             }
           } catch (error) {
-            const provider = bifrostBaseUrl ? 'bifrost' : 'direct'
-            finalizeStreamingMetrics(499, provider)
+            const providerLabel = 'direct'
+            finalizeStreamingMetrics(499, providerLabel)
             controller.error(error)
           }
         },
         cancel() {
-          const provider = bifrostBaseUrl ? 'bifrost' : 'direct'
-          finalizeStreamingMetrics(499, provider)
+          const providerLabel = 'direct'
+          finalizeStreamingMetrics(499, providerLabel)
           reader.cancel().catch(() => undefined)
         },
       })

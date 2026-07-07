@@ -41,33 +41,49 @@ interface ProviderRow {
  * 3. Environment variables (ANTHROPIC_API_KEY + UPSTREAM_ANTHROPIC_BASE_URL)
  */
 export async function resolveProvider(): Promise<ResolvedProvider | null> {
+  const all = await resolveAllProviders()
+  return all.length > 0 ? all[0]! : null
+}
+
+/**
+ * Resolve ALL active providers in fallback order (default first).
+ * Used by the fallback chain: try provider 1, if it fails try 2, etc.
+ */
+export async function resolveAllProviders(): Promise<ResolvedProvider[]> {
+  const results: ResolvedProvider[] = []
+
   try {
-    // Try to get default provider first, then any active one
     const providers = await prisma.$queryRaw<ProviderRow[]>`
       SELECT "id", "name", "displayName", "baseUrl", "authMethod", "authHeaderName", "authValue", "anthropicVersion"
       FROM "providers"
       WHERE "isActive" = true
       ORDER BY "isDefault" DESC, "createdAt" ASC
-      LIMIT 1
     `
 
-    if (providers.length > 0) {
-      const p = providers[0]!
-      return {
+    for (const p of providers) {
+      results.push({
         name: p.name,
         displayName: p.displayName,
         baseUrl: p.baseUrl.replace(/\/+$/, ''),
         authHeaders: buildAuthHeaders(p.authMethod, p.authValue, p.authHeaderName),
         anthropicVersion: p.anthropicVersion || '2023-06-01',
-      }
+      })
     }
   } catch (err) {
-    // DB might not have the providers table yet or query fails — fall through to env
     console.warn('[provider-resolver] DB query failed, falling back to env:', (err as Error).message?.slice(0, 100))
   }
 
-  // Fallback: use environment variables (backward compatible)
-  return resolveFromEnv()
+  // Always add env fallback as the last resort
+  const envProvider = resolveFromEnv()
+  if (envProvider) {
+    // Don't add duplicate if already in DB results
+    const alreadyInDb = results.some(r => r.baseUrl === envProvider.baseUrl)
+    if (!alreadyInDb) {
+      results.push(envProvider)
+    }
+  }
+
+  return results
 }
 
 function resolveFromEnv(): ResolvedProvider | null {
