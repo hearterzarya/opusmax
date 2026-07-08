@@ -291,6 +291,17 @@ export async function POST(request: NextRequest) {
       // Settings table might not exist — use original model
     }
 
+    // Model alias mapping — translate proxy-specific names to real Anthropic IDs
+    // Some providers (OpusMax) accept custom names, but direct Anthropic needs real IDs
+    const MODEL_ALIASES: Record<string, string> = {
+      'claude-sonnet-4-6': 'claude-sonnet-4-5-20250514',
+      'claude-opus-4-8': 'claude-opus-4-20250514',
+      'claude-haiku-4-5': 'claude-haiku-4-5-20250514',
+      'claude-sonnet-4-5': 'claude-sonnet-4-5-20250514',
+    }
+    // Apply alias only for the effective model (providers with modelOverride won't use this)
+    const resolvedModel = MODEL_ALIASES[effectiveModel] || effectiveModel
+
     // ─── PROVIDER FALLBACK CHAIN ───
     // Try each active provider in order (default first). If one fails with
     // 4xx/5xx or network error, automatically try the next provider.
@@ -324,7 +335,7 @@ export async function POST(request: NextRequest) {
 
         // Prepare body based on provider format
         let bodyForProvider: Record<string, unknown>
-        const modelName = provider.modelOverride || effectiveModel
+        const modelName = provider.modelOverride || resolvedModel
 
         if (provider.format === 'openai') {
           // Convert Anthropic request → OpenAI format
