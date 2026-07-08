@@ -293,10 +293,11 @@ export async function POST(request: NextRequest) {
     // Model alias mapping — translate proxy-specific names to real Anthropic IDs
     // Some providers (OpusMax) accept custom names, but direct Anthropic needs real IDs
     const MODEL_ALIASES: Record<string, string> = {
-      'claude-sonnet-4-6': 'claude-sonnet-4-5',
-      'claude-opus-4-8': 'claude-opus-4',
-      'claude-haiku-4-5': 'claude-haiku-4-5',
-      'claude-sonnet-4-5': 'claude-sonnet-4-5',
+      'claude-sonnet-4-6': 'claude-sonnet-4-5-20250514',
+      'claude-opus-4-8': 'claude-opus-4-20250514',
+      'claude-haiku-4-5': 'claude-haiku-4-5-20250514',
+      'claude-sonnet-4-5': 'claude-sonnet-4-5-20250514',
+      'claude-haiku-3-5': 'claude-3-5-haiku-20241022',
     }
     // Apply alias only for the effective model (providers with modelOverride won't use this)
     const resolvedModel = MODEL_ALIASES[effectiveModel] || effectiveModel
