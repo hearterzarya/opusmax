@@ -336,13 +336,21 @@ export async function POST(request: NextRequest) {
         let bodyForProvider: Record<string, unknown>
         const modelName = provider.modelOverride || resolvedModel
 
+        // Debug: log model resolution for troubleshooting
+        if (provider.modelOverride) {
+          console.log(`[provider] "${provider.name}" using modelOverride: ${provider.modelOverride}`)
+        }
+
         if (provider.format === 'openai') {
           // Convert Anthropic request → OpenAI format
           bodyForProvider = anthropicToOpenAIRequest({ ...upstreamBody, model: modelName })
         } else {
-          // For Anthropic format — ensure only clean fields are sent
-          bodyForProvider = { ...upstreamBody, model: modelName }
+          // For Anthropic format — force model name explicitly
+          bodyForProvider = Object.assign({}, upstreamBody, { model: modelName })
         }
+
+        // Extra safety: ensure model is definitely set to what we want
+        bodyForProvider.model = modelName
 
         // Build headers
         const headers: Record<string, string> = {
