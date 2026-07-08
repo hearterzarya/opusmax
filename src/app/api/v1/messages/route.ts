@@ -349,22 +349,6 @@ export async function POST(request: NextRequest) {
         } else {
           // For Anthropic format — force model name explicitly
           bodyForProvider = Object.assign({}, upstreamBody, { model: modelName })
-
-          // When routing to a smaller model (haiku), strip features it doesn't support
-          if (modelName.includes('haiku')) {
-            delete bodyForProvider.thinking
-            delete bodyForProvider.top_level_thinking
-            delete bodyForProvider.betas
-            // Haiku has lower max_tokens limit
-            if (bodyForProvider.max_tokens && (bodyForProvider.max_tokens as number) > 8192) {
-              bodyForProvider.max_tokens = 8192
-            }
-            // Remove tool_choice if it's 'any' (haiku may not support forced tool use)
-            const tc = bodyForProvider.tool_choice as { type?: string } | undefined
-            if (tc?.type === 'any') {
-              bodyForProvider.tool_choice = { type: 'auto' }
-            }
-          }
         }
 
         // Extra safety: ensure model is definitely set to what we want
