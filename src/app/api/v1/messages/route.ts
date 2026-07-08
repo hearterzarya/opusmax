@@ -340,6 +340,7 @@ export async function POST(request: NextRequest) {
           // Convert Anthropic request → OpenAI format
           bodyForProvider = anthropicToOpenAIRequest({ ...upstreamBody, model: modelName })
         } else {
+          // For Anthropic format — ensure only clean fields are sent
           bodyForProvider = { ...upstreamBody, model: modelName }
         }
 
