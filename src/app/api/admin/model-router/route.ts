@@ -19,6 +19,7 @@ const ANTHROPIC_MODELS = [
 const updateSchema = z.object({
   enabled: z.boolean(),
   targetModel: z.string().trim().min(1).optional(),
+  providerName: z.string().trim().optional(), // which provider to apply override to (empty = all)
 })
 
 export async function GET() {
@@ -27,12 +28,18 @@ export async function GET() {
     if (!session) return createErrorResponse(ErrorCodes.AUTHENTICATION_ERROR, 'Unauthorized', 401)
 
     const settings = await prisma.$queryRaw<Array<{ key: string; value: string }>>`
-      SELECT "key", "value" FROM "gateway_settings" WHERE "key" IN ('model_override_enabled', 'model_override_target')
+      SELECT "key", "value" FROM "gateway_settings" WHERE "key" IN ('model_override_enabled', 'model_override_target', 'model_override_provider')
     `
 
     const map = new Map(settings.map(s => [s.key, s.value]))
     const enabled = map.get('model_override_enabled') === 'true'
     const targetModel = map.get('model_override_target') || null
+    const providerName = map.get('model_override_provider') || null
+
+    // Get active providers for the dropdown
+    const providers = await prisma.$queryRaw<Array<{ name: string; displayName: string }>>`
+      SELECT "name", "displayName" FROM "providers" WHERE "isActive" = true ORDER BY "isDefault" DESC, "createdAt" ASC
+    `.catch(() => [] as Array<{ name: string; displayName: string }>)
 
     // Get last 24h token usage per model
     const usage = await prisma.$queryRaw<Array<{ model: string; total_input: bigint; total_output: bigint; total_tokens: bigint; request_count: bigint }>>`
@@ -48,8 +55,9 @@ export async function GET() {
     `
 
     return NextResponse.json({
-      modelOverride: { enabled, targetModel },
+      modelOverride: { enabled, targetModel, providerName },
       availableModels: ANTHROPIC_MODELS,
+      providers: providers || [],
       usage24h: usage.map(u => ({
         model: u.model,
         inputTokens: Number(u.total_input),
@@ -89,7 +97,13 @@ export async function POST(request: NextRequest) {
       `
     }
 
-    return NextResponse.json({ success: true, enabled: data.enabled, targetModel: data.targetModel })
+    const provName = data.providerName || ''
+    await prisma.$executeRaw`
+      INSERT INTO "gateway_settings" ("key", "value", "updatedAt") VALUES ('model_override_provider', ${provName}, ${now})
+      ON CONFLICT ("key") DO UPDATE SET "value" = ${provName}, "updatedAt" = ${now}
+    `
+
+    return NextResponse.json({ success: true, enabled: data.enabled, targetModel: data.targetModel, providerName: data.providerName })
   } catch (error) {
     if (error instanceof z.ZodError) {
       return createErrorResponse(ErrorCodes.VALIDATION_ERROR, error.issues.map(i => i.message).join(', '), 400)

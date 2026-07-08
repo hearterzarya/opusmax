@@ -265,20 +265,26 @@ export async function POST(request: NextRequest) {
         upstreamBody[key] = value
       }
     }
+    // Anthropic API requires max_tokens — add default if not provided
+    if (!upstreamBody.max_tokens) {
+      upstreamBody.max_tokens = 8192
+    }
     const originalModel = validatedBody.model
 
     // ─── GLOBAL MODEL OVERRIDE ───
     // Admin can force all requests to a cheaper model from the admin panel
     let effectiveModel = originalModel
+    let overrideProviderName: string | null = null
     try {
       const overrideSettings = await prisma.$queryRaw<Array<{ key: string; value: string }>>`
-        SELECT "key", "value" FROM "gateway_settings" WHERE "key" IN ('model_override_enabled', 'model_override_target')
+        SELECT "key", "value" FROM "gateway_settings" WHERE "key" IN ('model_override_enabled', 'model_override_target', 'model_override_provider')
       `
       const settingsMap = new Map(overrideSettings.map(s => [s.key, s.value]))
       if (settingsMap.get('model_override_enabled') === 'true') {
         const target = settingsMap.get('model_override_target')
         if (target) {
           effectiveModel = target
+          overrideProviderName = settingsMap.get('model_override_provider') || null
         }
       }
     } catch {
@@ -292,7 +298,14 @@ export async function POST(request: NextRequest) {
     timing.hrRoutingCompletedAt = performance.now()
 
     let upstreamResponse: Response | null = null
-    const allProviders = await resolveAllProviders()
+    let allProviders = await resolveAllProviders()
+
+    // If admin specified a specific provider for the override, prioritize it
+    if (overrideProviderName) {
+      const prioritized = allProviders.filter(p => p.name === overrideProviderName)
+      const rest = allProviders.filter(p => p.name !== overrideProviderName)
+      allProviders = [...prioritized, ...rest]
+    }
 
     if (allProviders.length === 0) {
       return createErrorResponse(

@@ -21,8 +21,9 @@ interface UsageEntry {
 }
 
 interface RouterData {
-  modelOverride: { enabled: boolean; targetModel: string | null }
+  modelOverride: { enabled: boolean; targetModel: string | null; providerName: string | null }
   availableModels: ModelInfo[]
+  providers: Array<{ name: string; displayName: string }>
   usage24h: UsageEntry[]
 }
 
@@ -39,6 +40,7 @@ export default function ModelRouterPage() {
   const [saving, setSaving] = useState(false)
   const [enabled, setEnabled] = useState(false)
   const [selectedModel, setSelectedModel] = useState<string>('')
+  const [selectedProvider, setSelectedProvider] = useState<string>('')
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchData = useCallback(async () => {
@@ -49,6 +51,7 @@ export default function ModelRouterPage() {
         setData(json)
         setEnabled(json.modelOverride.enabled)
         setSelectedModel(json.modelOverride.targetModel || '')
+        setSelectedProvider(json.modelOverride.providerName || '')
       }
     } catch {} finally { setLoading(false) }
   }, [])
@@ -69,7 +72,7 @@ export default function ModelRouterPage() {
       const res = await fetch('/api/admin/model-router', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled, targetModel: selectedModel || undefined }),
+        body: JSON.stringify({ enabled, targetModel: selectedModel || undefined, providerName: selectedProvider || undefined }),
       })
       if (res.ok) {
         toast.success(enabled ? `All requests now routed to ${selectedModel}` : 'Model override disabled — using user-requested models')
@@ -112,6 +115,26 @@ export default function ModelRouterPage() {
 
         {enabled && (
           <div className="mt-5 space-y-4">
+            {/* Provider selection */}
+            {data?.providers && data.providers.length > 0 && (
+              <div>
+                <label className="text-xs font-medium uppercase tracking-[0.16em] text-white/55">Apply to provider:</label>
+                <select
+                  value={selectedProvider}
+                  onChange={(e) => setSelectedProvider(e.target.value)}
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white focus:border-fuchsia-400/50 focus:outline-none"
+                >
+                  <option value="">All Providers (global)</option>
+                  {data.providers.map((p) => (
+                    <option key={p.name} value={p.name}>{p.displayName} ({p.name})</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] text-white/40">
+                  {selectedProvider ? `Only requests to "${selectedProvider}" will use the override model` : 'All requests to any provider will use the override model'}
+                </p>
+              </div>
+            )}
+
             <div>
               <label className="text-xs font-medium uppercase tracking-[0.16em] text-white/55">Route all requests to:</label>
               <div className="mt-3 grid gap-2">
