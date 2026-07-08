@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
 
     const validatedBody = messageSchema.parse(requestBody)
     const tokens = estimateTokens(validatedBody)
-    timing.requestedModel = effectiveModel
+    timing.requestedModel = validatedBody.model
 
     // 5-hour rolling token window (hard limit) — enforced per API key id.
     const hourlyBudget = key.hourlyTokenBudget
@@ -311,7 +311,7 @@ export async function POST(request: NextRequest) {
 
         // Prepare body based on provider format
         let bodyForProvider: Record<string, unknown>
-        const modelName = provider.modelOverride || originalModel
+        const modelName = provider.modelOverride || effectiveModel
 
         if (provider.format === 'openai') {
           // Convert Anthropic request → OpenAI format
