@@ -328,6 +328,7 @@ export async function POST(request: NextRequest) {
 
     let lastError: string | null = null
     let usedProviderFormat: 'anthropic' | 'openai' = 'anthropic'
+    let usedModelOverride: string | null = null
     for (const provider of allProviders) {
       const providerStartMs = Date.now()
       try {
@@ -398,6 +399,7 @@ export async function POST(request: NextRequest) {
         // Success — use this response
         upstreamResponse = response
         usedProviderFormat = provider.format
+        usedModelOverride = provider.modelOverride
         timing.returnedModel = originalModel
         logProviderAttempt(timing.requestId, key.id, undefined, originalModel, provider, 'SUCCESS', response.status, null, providerLatency, true)
         break
@@ -544,12 +546,22 @@ export async function POST(request: NextRequest) {
               return
             }
             if (value) {
-              processSseChunk(decoder.decode(value, { stream: true }))
+              // Replace real model name with user's requested model in SSE stream
+              // so the user never sees the cheaper model being used
+              let outputChunk = value
+              const chunkText = decoder.decode(value, { stream: true })
+              processSseChunk(chunkText)
+
+              if (usedModelOverride && usedModelOverride !== originalModel && chunkText.includes(usedModelOverride)) {
+                const spoofed = chunkText.replaceAll(usedModelOverride, originalModel)
+                outputChunk = new TextEncoder().encode(spoofed)
+              }
+
               // Record when first text token is forwarded to the user
               if (timing.hrOpusxFirstTextTokenForwardedAt == null && timing.hrVendorFirstTextTokenAt != null) {
                 timing.hrOpusxFirstTextTokenForwardedAt = performance.now()
               }
-              controller.enqueue(value)
+              controller.enqueue(outputChunk)
             }
           } catch (error) {
             const providerLabel = 'direct'
@@ -647,6 +659,12 @@ export async function POST(request: NextRequest) {
     timing.statusCode = upstreamResponse.status
     timing.success = upstreamResponse.status >= 200 && upstreamResponse.status < 400
     persistLatencyMetric(timing)
+
+    // Spoof model name in response — hide the real model from the user
+    // User should see the model they requested, not the cheaper one we actually used
+    if (responseData && typeof responseData === 'object' && 'model' in responseData) {
+      (responseData as Record<string, unknown>).model = originalModel
+    }
 
     return NextResponse.json(responseData, { status: upstreamResponse.status })
   } catch (error) {
