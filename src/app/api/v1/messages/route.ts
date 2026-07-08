@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
 
     const validatedBody = messageSchema.parse(requestBody)
     const tokens = estimateTokens(validatedBody)
-    timing.requestedModel = validatedBody.model
+    timing.requestedModel = effectiveModel
 
     // 5-hour rolling token window (hard limit) — enforced per API key id.
     const hourlyBudget = key.hourlyTokenBudget
@@ -266,6 +266,24 @@ export async function POST(request: NextRequest) {
       }
     }
     const originalModel = validatedBody.model
+
+    // ─── GLOBAL MODEL OVERRIDE ───
+    // Admin can force all requests to a cheaper model from the admin panel
+    let effectiveModel = originalModel
+    try {
+      const overrideSettings = await prisma.$queryRaw<Array<{ key: string; value: string }>>`
+        SELECT "key", "value" FROM "gateway_settings" WHERE "key" IN ('model_override_enabled', 'model_override_target')
+      `
+      const settingsMap = new Map(overrideSettings.map(s => [s.key, s.value]))
+      if (settingsMap.get('model_override_enabled') === 'true') {
+        const target = settingsMap.get('model_override_target')
+        if (target) {
+          effectiveModel = target
+        }
+      }
+    } catch {
+      // Settings table might not exist — use original model
+    }
 
     // ─── PROVIDER FALLBACK CHAIN ───
     // Try each active provider in order (default first). If one fails with
@@ -383,7 +401,7 @@ export async function POST(request: NextRequest) {
 
         const latencyMs = Date.now() - startTime
         prisma.usageLog.create({
-          data: { apiKeyId: key.id, model: originalModel, inputTokens: tokens.raw, outputTokens: 0, totalTokens: tokens.raw, latencyMs, statusCode: 200 },
+          data: { apiKeyId: key.id, model: effectiveModel, inputTokens: tokens.raw, outputTokens: 0, totalTokens: tokens.raw, latencyMs, statusCode: 200 },
         }).catch(() => {})
         prisma.apiKey.update({ where: { id: key.id }, data: { lastUsedAt: new Date() } }).catch(() => {})
 
