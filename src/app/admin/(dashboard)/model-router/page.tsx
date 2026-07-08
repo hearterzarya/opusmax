@@ -213,7 +213,7 @@ export default function ModelRouterPage() {
         </div>
         <div className="mt-3 space-y-2 text-xs text-white/50">
           <p>• When enabled, user requests <span className="text-white/80 font-mono">claude-opus-4-8</span> but actually gets routed to your selected model</p>
-          <p>• The user/Claude Code won't notice — response format stays the same</p>
+          <p>• The user/Claude Code won&apos;t notice — response format stays the same</p>
           <p>• Switch to <span className="text-emerald-300">Haiku</span> for 60x cheaper tokens vs <span className="text-rose-300">Opus</span></p>
           <p>• Disable anytime to let users choose their own models</p>
         </div>
