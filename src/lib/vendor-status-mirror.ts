@@ -8,7 +8,7 @@
  * periodically (server-side) and extract the latency value semantically.
  */
 
-const OPUSMAX_STATUS_URL = 'https://www.opusmax.pro/status'
+const OPUSMAX_STATUS_URL = 'https://opusxmax.vercel.app/status'
 const FETCH_TIMEOUT_MS = 15000
 const STALE_THRESHOLD_MS = 90_000
 const UNAVAILABLE_THRESHOLD_MS = 5 * 60 * 1000

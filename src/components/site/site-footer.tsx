@@ -48,7 +48,7 @@ export function SiteFooter() {
       <div className="border-t border-white/5">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-6 py-5 text-xs text-muted-foreground md:flex-row">
           <p>© {new Date().getFullYear()} OpusMax. All rights reserved.</p>
-          <p className="font-mono">build · {new Date().getFullYear()}.opusmax.pro</p>
+          <p className="font-mono">build · {new Date().getFullYear()}.opusxmax.vercel.app</p>
         </div>
       </div>
     </footer>

@@ -95,7 +95,7 @@ export default function AdminLoginPage() {
               <input
                 id="email"
                 type="email"
-                placeholder="admin@opusmax.pro"
+                placeholder="admin@opusxmax.vercel.app"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required

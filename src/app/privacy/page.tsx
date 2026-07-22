@@ -76,7 +76,7 @@ const sections: Section[] = [
   },
   {
     title: '10. Contact',
-    body: 'For privacy-related questions, please contact us at privacy@opusmax.pro.',
+    body: 'For privacy-related questions, please contact us at hello@opusxmax.vercel.app.',
   },
 ]
 

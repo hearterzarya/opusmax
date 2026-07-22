@@ -59,7 +59,7 @@ const steps = [
   {
     n: '02',
     title: 'Set base URL',
-    desc: 'Point any Anthropic client at api.opusmax.pro. Everything else stays the same.',
+    desc: 'Point any Anthropic client at https://opusxmax.vercel.app/api. Everything else stays the same.',
     icon: Layers,
   },
   {
@@ -87,8 +87,8 @@ function HeroTerminal() {
           </span>
         </div>
         <pre className="overflow-x-auto px-5 py-5 text-left font-mono text-[13px] leading-relaxed text-white/85">
-{`$ export ANTHROPIC_BASE_URL=https://api.opusmax.pro/v1
-$ export ANTHROPIC_API_KEY=sk-ant-opm-***
+{`$ export ANTHROPIC_BASE_URL=https://opusxmax.vercel.app/api/v1
+$ export ANTHROPIC_API_KEY=sk-ant-ox-***
 
 $ curl $ANTHROPIC_BASE_URL/messages \\
     -H "x-api-key: $ANTHROPIC_API_KEY" \\
