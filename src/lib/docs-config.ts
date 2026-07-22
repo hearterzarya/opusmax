@@ -128,10 +128,10 @@ export const CLAUDE_CODE_SETTINGS_JSON = `{
   "env": {
     "ANTHROPIC_AUTH_TOKEN": "${API_KEY_PLACEHOLDER}",
     "ANTHROPIC_BASE_URL": "${API_BASE_URL}",
-    "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+    "ANTHROPIC_MODEL": "claude-fable-5[1m]",
     "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-5-20251001",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8[1m]",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5-20251001",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   },
@@ -157,7 +157,7 @@ export const AUTH_HEADERS_CODE = `x-api-key: ${API_KEY_PLACEHOLDER}
 Authorization: Bearer ${API_KEY_PLACEHOLDER}`
 
 export const MESSAGES_REQUEST_CODE = `{
-  "model": "claude-sonnet-4-6",
+  "model": "claude-fable-5[1m]",
   "max_tokens": 1024,
   "messages": [
     {
@@ -172,7 +172,7 @@ export const MESSAGES_RESPONSE_CODE = `{
   "id": "msg_...",
   "type": "message",
   "role": "assistant",
-  "model": "claude-sonnet-4-6",
+  "model": "claude-fable-5[1m]",
   "content": [
     {
       "type": "text",
@@ -216,7 +216,7 @@ export const MODELS_RESPONSE_CODE = `{
 }`
 
 export const COUNT_TOKENS_REQUEST_CODE = `{
-  "model": "claude-sonnet-4-6",
+  "model": "claude-fable-5[1m]",
   "messages": [
     {
       "role": "user",
