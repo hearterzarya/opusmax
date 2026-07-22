@@ -59,7 +59,7 @@ ADMIN_PASSWORD=YourSecurePassword123!
 JWT_SECRET=your-super-secret-jwt-key-at-least-32-chars-long
 
 # App URL
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=https://opusxmax.vercel.app
 ```
 
 ### 3. Database Setup
@@ -81,7 +81,7 @@ pnpm db:seed
 pnpm dev
 ```
 
-Visit http://localhost:3000
+Visit https://opusxmax.vercel.app
 
 ## Docker Setup (Production)
 
@@ -98,7 +98,7 @@ docker-compose down
 
 ## Admin Login
 
-- **URL**: http://localhost:3000/admin/login
+- **URL**: https://opusxmax.vercel.app/admin/login
 - **Email**: admin@opusx.gateway (or as set in ADMIN_EMAIL)
 - **Password**: OpusX-Admin-2026! (or as set in ADMIN_PASSWORD)
 
