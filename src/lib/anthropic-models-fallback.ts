@@ -42,8 +42,10 @@ const FALLBACK_MODEL_ROWS: ReadonlyArray<{
   maxIn: number
   maxOut: number
 }> = [
-  { id: 'claude-opus-4-8', name: 'Opus 4.8', maxIn: 1_000_000, maxOut: 128_000 },
+  { id: 'claude-opus-4-8[1m]', name: 'Opus 4.8', maxIn: 1_000_000, maxOut: 128_000 },
   { id: 'claude-opus-4-7', name: 'Opus 4.7', maxIn: 1_000_000, maxOut: 128_000 },
+  { id: 'claude-fable-5[1m]', name: 'Fable 5', maxIn: 1_000_000, maxOut: 128_000 },
+  { id: 'claude-sonnet-5', name: 'Sonnet 5', maxIn: 200_000, maxOut: 64_000 },
   { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', maxIn: 200_000, maxOut: 64_000 },
   { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', maxIn: 200_000, maxOut: 64_000 },
 ]

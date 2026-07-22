@@ -189,7 +189,13 @@ export const MESSAGES_RESPONSE_CODE = `{
 export const MODELS_RESPONSE_CODE = `{
   "data": [
     {
-      "id": "claude-opus-4-8",
+      "id": "claude-fable-5[1m]",
+      "object": "model",
+      "display_name": "Claude Fable 5",
+      "created_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "id": "claude-opus-4-8[1m]",
       "object": "model",
       "display_name": "Claude Opus 4.8",
       "created_at": "2026-05-28T00:00:00Z"
@@ -199,6 +205,12 @@ export const MODELS_RESPONSE_CODE = `{
       "object": "model",
       "display_name": "Claude Opus 4.7",
       "created_at": "2026-04-16T00:00:00Z"
+    },
+    {
+      "id": "claude-sonnet-5",
+      "object": "model",
+      "display_name": "Claude Sonnet 5",
+      "created_at": "2026-06-01T00:00:00Z"
     },
     {
       "id": "claude-sonnet-4-6",
@@ -256,12 +268,20 @@ export const IMAGE_ANALYSIS_REQUEST_CODE = `{
 
 export const AVAILABLE_MODELS = [
   {
-    name: 'Opus 4.8',
+    name: 'Fable 5',
     badge: 'Latest',
     badgeClass: 'bg-amber-500/15 text-amber-200 ring-amber-500/30',
-    id: 'claude-opus-4-8',
+    id: 'claude-fable-5[1m]',
     description:
-      'Latest flagship — 1M context, adaptive thinking, and top-tier agentic coding performance.',
+      'Mythos-class flagship — highest capability tier, adaptive thinking, 1M context, and top-tier agentic performance.',
+  },
+  {
+    name: 'Opus 4.8',
+    badge: 'Flagship',
+    badgeClass: 'bg-violet-500/15 text-violet-200 ring-violet-500/30',
+    id: 'claude-opus-4-8[1m]',
+    description:
+      'Previous flagship — advanced reasoning, coding, and long-context workflows.',
   },
   {
     name: 'Opus 4.7',
@@ -269,21 +289,28 @@ export const AVAILABLE_MODELS = [
     badgeClass: 'bg-amber-500/10 text-amber-200/70 ring-amber-500/20',
     id: 'claude-opus-4-7',
     description:
-      'Previous Opus generation for advanced reasoning, coding, and long-context workflows.',
+      'Previous generation Opus — still available for backward compatibility.',
+  },
+  {
+    name: 'Sonnet 5',
+    badge: 'Popular',
+    badgeClass: 'bg-cyan-500/15 text-cyan-200 ring-cyan-500/30',
+    id: 'claude-sonnet-5',
+    description: 'Latest Sonnet — balanced model for everyday coding, writing, and automation.',
   },
   {
     name: 'Sonnet 4.6',
-    badge: 'Popular',
-    badgeClass: 'bg-violet-500/15 text-violet-200 ring-violet-500/30',
+    badge: 'Stable',
+    badgeClass: 'bg-violet-500/10 text-violet-200/60 ring-violet-500/20',
     id: 'claude-sonnet-4-6',
-    description: 'Balanced model for everyday coding, writing, automation, and development tasks.',
+    description: 'Previous Sonnet generation — stable and reliable for production use.',
   },
   {
     name: 'Haiku 4.5',
     badge: 'Fast',
-    badgeClass: 'bg-cyan-500/15 text-cyan-200 ring-cyan-500/30',
+    badgeClass: 'bg-emerald-500/15 text-emerald-200 ring-emerald-500/30',
     id: 'claude-haiku-4-5-20251001',
-    description: 'Fast model for lightweight queries, quick responses, and high-throughput usage.',
+    description: 'Fast, lightweight model for quick responses and high-throughput usage.',
   },
 ] as const
 

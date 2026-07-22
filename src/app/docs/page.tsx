@@ -233,7 +233,7 @@ export default function DocsPage() {
                 <div className="space-y-2">
                   <ConfigRow label="Base URL" value={API_V1_URL} />
                   <ConfigRow label="API Key" value={API_KEY_PLACEHOLDER} />
-                  <ConfigRow label="Model" value="claude-sonnet-4-6" />
+                  <ConfigRow label="Model" value="claude-fable-5[1m]" />
                 </div>
               </DocsSection>
 
