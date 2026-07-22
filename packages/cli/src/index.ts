@@ -32,7 +32,7 @@ program
 program
   .command('test')
   .description('Send a minimal test message through the gateway')
-  .option('-m, --model <id>', 'Model id', 'claude-sonnet-4-6')
+  .option('-m, --model <id>', 'Model id', 'claude-fable-5[1m]')
   .action(async (opts: { model?: string }) => {
     await runTest(opts)
   })

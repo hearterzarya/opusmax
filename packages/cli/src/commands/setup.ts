@@ -101,7 +101,7 @@ export async function runSetup() {
   if (runTest) {
     const { runTest: testCmd } = await import('./test.js')
     console.log()
-    await testCmd({ model: 'claude-sonnet-4-6' })
+    await testCmd({ model: 'claude-fable-5[1m]' })
   } else {
     console.log()
     log.success('Setup complete')

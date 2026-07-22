@@ -4,7 +4,7 @@ import { testMessage, ApiError } from '../utils/api.js'
 import { loadConfig } from '../utils/config.js'
 import { log, printBanner } from '../utils/logger.js'
 
-const DEFAULT_TEST_MODEL = 'claude-sonnet-4-6'
+const DEFAULT_TEST_MODEL = 'claude-fable-5[1m]'
 
 export async function runTest(options: { model?: string }) {
   printBanner()

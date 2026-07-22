@@ -27,10 +27,10 @@ function claudeEnvMerge(baseUrl: string, apiKey: string) {
         ...env,
         ANTHROPIC_AUTH_TOKEN: apiKey,
         ANTHROPIC_BASE_URL: baseUrl,
-        ANTHROPIC_MODEL: env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
+        ANTHROPIC_MODEL: env.ANTHROPIC_MODEL ?? 'claude-fable-5[1m]',
         ANTHROPIC_SMALL_FAST_MODEL: env.ANTHROPIC_SMALL_FAST_MODEL ?? 'claude-haiku-4-5-20251001',
-        ANTHROPIC_DEFAULT_SONNET_MODEL: env.ANTHROPIC_DEFAULT_SONNET_MODEL ?? 'claude-sonnet-4-6',
-        ANTHROPIC_DEFAULT_OPUS_MODEL: env.ANTHROPIC_DEFAULT_OPUS_MODEL ?? 'claude-opus-4-8',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: env.ANTHROPIC_DEFAULT_SONNET_MODEL ?? 'claude-sonnet-5',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: env.ANTHROPIC_DEFAULT_OPUS_MODEL ?? 'claude-opus-4-8[1m]',
         ANTHROPIC_DEFAULT_HAIKU_MODEL: env.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? 'claude-haiku-4-5-20251001',
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC ?? '1',
       },
@@ -158,7 +158,7 @@ export function printIdeSnippetBlock(ide: IdeId, baseUrl: string, apiKey: string
     console.log(chalk.gray('  Cursor → Settings → Models → OpenAI-compatible'))
     console.log(chalk.cyan(`  Base URL: ${DEFAULT_V1_URL}`))
     console.log(chalk.cyan(`  API Key:  ${apiKey.slice(0, 12)}••••••••`))
-    console.log(chalk.cyan('  Model:    claude-sonnet-4-6'))
+    console.log(chalk.cyan('  Model:    claude-fable-5[1m]'))
   }
   if (ide === 'windsurf') {
     console.log(chalk.gray('  Windsurf → Settings → AI Provider'))
