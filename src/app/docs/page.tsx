@@ -3,7 +3,8 @@
 import { SiteHeader } from '@/components/site/site-header'
 import { SiteFooter } from '@/components/site/site-footer'
 import { DocsApiCodePair, DocsApiSection } from '@/components/docs/docs-api-section'
-import { ConfigRow, ModelCard, ToolCard } from '@/components/docs/docs-cards'
+import { ModelGrid } from '@/components/site/model-grid'
+import { ConfigRow, ToolCard } from '@/components/docs/docs-cards'
 import { DocsCodeBlock } from '@/components/docs/docs-code-block'
 import { DocsMobileNav } from '@/components/docs/docs-mobile-nav'
 import { DocsSection, DocsSubheading, DocsProse } from '@/components/docs/docs-section'
@@ -17,7 +18,6 @@ import {
   API_PATHS,
   API_V1_URL,
   AUTH_HEADERS_CODE,
-  AVAILABLE_MODELS,
   CLI_COMMANDS,
   CLI_PACKAGE,
   CLI_QUICK_START_CODE,
@@ -35,6 +35,7 @@ import {
   MODELS_RESPONSE_CODE,
   ROO_SETTINGS_JSON,
   WEB_SEARCH_REQUEST_CODE,
+  AVAILABLE_MODELS,
 } from '@/lib/docs-config'
 import { CheckCircle2 } from 'lucide-react'
 
@@ -368,11 +369,7 @@ export default function DocsPage() {
               </DocsSection>
 
               <DocsSection id="available-models" title="Available Models">
-                <div className="grid gap-4 lg:grid-cols-3">
-                  {AVAILABLE_MODELS.map((model) => (
-                    <ModelCard key={model.id} {...model} />
-                  ))}
-                </div>
+                <ModelGrid models={AVAILABLE_MODELS} />
                 <DocsProse>
                   Common aliases such as opus, sonnet, and haiku may map to the configured backend model depending on
                   gateway settings.

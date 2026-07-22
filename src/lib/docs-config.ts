@@ -273,7 +273,10 @@ export const AVAILABLE_MODELS = [
     badgeClass: 'bg-amber-500/15 text-amber-200 ring-amber-500/30',
     id: 'claude-fable-5[1m]',
     description:
-      'Mythos-class flagship — highest capability tier, adaptive thinking, 1M context, and top-tier agentic performance.',
+      'Mythos-class flagship — highest capability tier with adaptive thinking, 1M context, and top-tier agentic performance.',
+    context: '1M',
+    speed: 'Medium',
+    cost: 'Premium',
   },
   {
     name: 'Opus 4.8',
@@ -281,7 +284,10 @@ export const AVAILABLE_MODELS = [
     badgeClass: 'bg-violet-500/15 text-violet-200 ring-violet-500/30',
     id: 'claude-opus-4-8[1m]',
     description:
-      'Previous flagship — advanced reasoning, coding, and long-context workflows.',
+      'Anthropic flagship — advanced reasoning, coding, and long-context workflows at production scale.',
+    context: '1M',
+    speed: 'Medium',
+    cost: 'High',
   },
   {
     name: 'Opus 4.7',
@@ -289,30 +295,47 @@ export const AVAILABLE_MODELS = [
     badgeClass: 'bg-amber-500/10 text-amber-200/70 ring-amber-500/20',
     id: 'claude-opus-4-7',
     description:
-      'Previous generation Opus — still available for backward compatibility.',
+      'Previous-generation Opus — still available for backward compatibility with stable behavior.',
+    context: '1M',
+    speed: 'Medium',
+    cost: 'High',
   },
   {
     name: 'Sonnet 5',
     badge: 'Popular',
     badgeClass: 'bg-cyan-500/15 text-cyan-200 ring-cyan-500/30',
     id: 'claude-sonnet-5',
-    description: 'Latest Sonnet — balanced model for everyday coding, writing, and automation.',
+    description:
+      'Latest Sonnet — balanced model for everyday coding, writing, and automation with great latency.',
+    context: '200K',
+    speed: 'Fast',
+    cost: 'Standard',
   },
   {
     name: 'Sonnet 4.6',
     badge: 'Stable',
     badgeClass: 'bg-violet-500/10 text-violet-200/60 ring-violet-500/20',
     id: 'claude-sonnet-4-6',
-    description: 'Previous Sonnet generation — stable and reliable for production use.',
+    description:
+      'Previous Sonnet generation — stable and reliable for production use, predictable behavior.',
+    context: '200K',
+    speed: 'Fast',
+    cost: 'Standard',
   },
   {
     name: 'Haiku 4.5',
     badge: 'Fast',
     badgeClass: 'bg-emerald-500/15 text-emerald-200 ring-emerald-500/30',
     id: 'claude-haiku-4-5-20251001',
-    description: 'Fast, lightweight model for quick responses and high-throughput usage.',
+    description:
+      'Fast, lightweight model — built for quick responses and high-throughput, cost-sensitive flows.',
+    context: '200K',
+    speed: 'Fastest',
+    cost: 'Low',
   },
 ] as const
+
+export type AvailableModel = (typeof AVAILABLE_MODELS)[number]
 
 export const TROUBLESHOOTING_ITEMS = [
   {

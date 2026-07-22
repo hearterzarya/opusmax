@@ -7,7 +7,6 @@
    ========================================================= */
 @layer base {
   :root {
-    /* Surfaces — deep ink with violet undertone */
     --background: 250 60% 4%;
     --foreground: 240 20% 96%;
 
@@ -17,8 +16,7 @@
     --popover: 250 50% 6%;
     --popover-foreground: 240 20% 96%;
 
-    /* Brand accents */
-    --primary: 264 88% 66%;            /* violet */
+    --primary: 264 88% 66%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 240 20% 12%;
@@ -39,7 +37,6 @@
 
     --radius: 0.875rem;
 
-    /* Custom palette */
     --neon-violet: 264 88% 66%;
     --neon-pink:   320 90% 66%;
     --neon-cyan:   190 90% 60%;
@@ -368,9 +365,164 @@
   50%      { transform: translateY(-8px); }
 }
 
-/* Reveal on scroll (legacy) */
-.animate-on-scroll { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
-.animate-on-scroll.visible { opacity: 1; transform: translateY(0); }
+/* Float with gentle rotation */
+.float-wobble {
+  animation: float-wobble 14s ease-in-out infinite;
+}
+@keyframes float-wobble {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25%      { transform: translateY(-12px) rotate(1deg); }
+  50%      { transform: translateY(-4px) rotate(-1deg); }
+  75%      { transform: translateY(-16px) rotate(0.5deg); }
+}
+
+/* =========================================================
+   Reveal on scroll
+   ========================================================= */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity .7s cubic-bezier(.2,.8,.2,1), transform .7s cubic-bezier(.2,.8,.2,1);
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.reveal-delay-1 { transition-delay: .1s; }
+.reveal-delay-2 { transition-delay: .2s; }
+.reveal-delay-3 { transition-delay: .3s; }
+.reveal-delay-4 { transition-delay: .4s; }
+.reveal-delay-5 { transition-delay: .5s; }
+
+/* Reveal from left / right */
+.reveal-left {
+  opacity: 0;
+  transform: translateX(-32px);
+  transition: opacity .7s cubic-bezier(.2,.8,.2,1), transform .7s cubic-bezier(.2,.8,.2,1);
+}
+.reveal-left.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+.reveal-right {
+  opacity: 0;
+  transform: translateX(32px);
+  transition: opacity .7s cubic-bezier(.2,.8,.2,1), transform .7s cubic-bezier(.2,.8,.2,1);
+}
+.reveal-right.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* =========================================================
+   Model card holographic shimmer
+   ========================================================= */
+.model-card {
+  position: relative;
+  overflow: hidden;
+}
+.model-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    hsl(var(--foreground) / 0.06) 42%,
+    hsl(var(--neon-violet) / 0.12) 48%,
+    hsl(var(--neon-pink) / 0.08) 52%,
+    transparent 62%
+  );
+  opacity: 0;
+  transition: opacity .5s ease;
+}
+.model-card:hover::after {
+  opacity: 1;
+}
+.model-card .card-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .6s ease;
+  background: radial-gradient(
+    350px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    hsl(var(--neon-violet) / 0.18),
+    transparent 60%
+  );
+}
+.model-card:hover .card-glow {
+  opacity: 1;
+}
+
+/* =========================================================
+   Marquee strip
+   ========================================================= */
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee-scroll 30s linear infinite;
+}
+.marquee-track:hover {
+  animation-play-state: paused;
+}
+@keyframes marquee-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* =========================================================
+   Breathing pulse for badges/chips
+   ========================================================= */
+.breathe {
+  animation: breathe 3s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .55; }
+}
+.breathe-slow {
+  animation: breathe-slow 5s ease-in-out infinite;
+}
+@keyframes breathe-slow {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .6; }
+}
+
+/* =========================================================
+   Status dot pulse
+   ========================================================= */
+.pulse-ring {
+  position: relative;
+}
+.pulse-ring::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  animation: pulse-ring 2s ease-out infinite;
+  background: hsl(var(--neon-mint) / 0.4);
+}
+@keyframes pulse-ring {
+  0%   { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+/* =========================================================
+   Wave separator SVG
+   ========================================================= */
+.wave-separator {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  line-height: 0;
+}
+.wave-separator svg {
+  display: block;
+  width: 100%;
+  height: 60px;
+}
 
 /* =========================================================
    Scrollbar
@@ -430,12 +582,30 @@
 }
 .text-balance { text-wrap: balance; }
 
-/* Reduced motion */
+/* Counter animation */
+.count-up {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+}
+
+/* =========================================================
+   Reduced motion
+   ========================================================= */
 @media (prefers-reduced-motion: reduce) {
   .gradient-text,
   .aurora::before, .aurora::after, .aurora > .aurora-blob,
   .shimmer-frame::before,
-  .float-y {
+  .float-y,
+  .float-wobble,
+  .marquee-track,
+  .breathe, .breathe-slow,
+  .pulse-ring::before,
+  .model-card::after,
+  .reveal, .reveal-left, .reveal-right {
     animation: none !important;
+  }
+  .reveal, .reveal-left, .reveal-right {
+    opacity: 1;
+    transform: none;
   }
 }

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { AlertCircle, ArrowLeft, CheckCircle2, Copy, Loader2, Sparkles } from 'lucide-react'
+import { API_BASE_URL } from '@/lib/deploy-config'
 
 function extractErrorMessage(value: unknown, fallback: string): string {
   if (typeof value === 'string' && value.trim()) return value
@@ -199,7 +200,7 @@ export default function NewApiKeyPage() {
           </pre>
           <p className="mt-4 text-xs text-white/50">Or set manually:</p>
           <pre className="mt-2 overflow-x-auto rounded-xl border border-white/10 bg-black/40 p-3 font-mono text-xs text-white/80">
-{`ANTHROPIC_BASE_URL=https://opusxmax.vercel.app/api
+{`ANTHROPIC_BASE_URL=${API_BASE_URL}
 ANTHROPIC_API_KEY=${newKey}`}
           </pre>
         </div>
